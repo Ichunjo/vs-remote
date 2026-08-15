@@ -1,0 +1,108 @@
+[build-system]
+requires = ["hatchling>=1.32.0", "mypy~=2.3.0", "setuptools>=84.0.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vs-remote"
+version = "0.1.0"
+description = "Remote execution and frame proxy for VapourSynth"
+readme = "README.md"
+authors = [{ name = "Vardë", email = "ichunjo.le.terrible@gmail.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "vapoursynth>=79",
+    "vsjetengine>=1.6.0",
+    "pyzmq>=27.1.0",
+    "zstandard>=0.25.0",
+    "msgspec>=0.21.1",
+    "cyclopts>=4.22.5",
+    "rich>=15.0.0",
+]
+
+[project.scripts]
+vsremote = "vsremote.server.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vsremote"]
+artifacts = ["src/vsremote/_strides.*.*", "!src/vsremote/_strides.py"]
+exclude = ["src/vsremote/_strides.py"]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
+
+[dependency-groups]
+dev = [
+    "hatchling>=1.32.0",
+    "mypy~=2.3.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff~=0.16.0",
+    "setuptools>=84.0.0",
+    "types-setuptools>=84.0.0.20260812",
+    "vsstubs>=2.3.0",
+]
+
+[tool.pytest]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+disable_warnings = ["couldnt-parse"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+extend-select = [
+    "YTT",
+    "ASYNC",
+    "C4",
+    "LOG",
+    "G",
+    "PIE",
+    "PYI",
+    "PT",
+    "Q",
+    "RSE",
+    "RET",
+    "SIM",
+    "I",
+    "N",
+    "PERF",
+    "E",
+    "W",
+    "UP",
+    "FURB",
+    "RUF",
+]
+ignore = ["N802", "N815", "B009", "B010", "BLE001"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.*" = ["F401", "F403"]
+
+[tool.mypy]
+mypy_path = "stubs"
+
+# Flags changed by --strict
+warn_return_any = false
+extra_checks = false
+
+# Misc
+warn_unreachable = true
+
+enable_error_code = ["explicit-override"]
+allow_redefinition_new = true
+local_partial_types = true
+implicit_reexport = false
+strict = true
+
+show_column_numbers = true
+pretty = true
+color_output = true
+
+[[tool.mypy.overrides]]
+module = ["vapoursynth", "vapoursynth.*"]
+ignore_errors = true
