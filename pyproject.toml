@@ -7,8 +7,21 @@ name = "vs-remote"
 version = "0.1.0"
 description = "Remote execution and frame proxy for VapourSynth"
 readme = "README.md"
+license-files = ["LICENSE"]
 authors = [{ name = "Vardë", email = "ichunjo.le.terrible@gmail.com" }]
 requires-python = ">=3.12"
+keywords = ["video", "video-processing", "encoding", "server", "vapoursynth"]
+classifiers = [
+    "Topic :: Multimedia :: Graphics",
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
+]
 dependencies = [
     "vapoursynth>=79",
     "vsjetengine>=1.6.0",
