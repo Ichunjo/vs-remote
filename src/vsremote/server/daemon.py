@@ -158,10 +158,18 @@ class ServerDaemon:
         payload = pack_payload(event)
         zero_req_id = (0).to_bytes(4, byteorder="big")
         status_ok = bytes([StatusCode.OK])
-        for identity in list(self._subscribers):
-            task = asyncio.create_task(self._send_multipart([identity, zero_req_id, status_ok, payload]))
-            self._active_tasks.add(task)
-            task.add_done_callback(self._active_tasks.discard)
+        subscribers = list(self._subscribers)
+
+        async def send_all() -> None:
+            for identity in subscribers:
+                try:
+                    await self._send_multipart([identity, zero_req_id, status_ok, payload])
+                except Exception:
+                    logger.debug("Failed to send broadcast event to subscriber %r", identity)
+
+        task = asyncio.create_task(send_all())
+        self._active_tasks.add(task)
+        task.add_done_callback(self._active_tasks.discard)
 
     async def stop(self) -> None:
         """Stop server and clean up active connections and resources."""
@@ -190,6 +198,7 @@ class ServerDaemon:
 
         if self._active_tasks:
             await asyncio.gather(*self._active_tasks, return_exceptions=True)
+            self._active_tasks.clear()
 
         if self._socket:
             self._socket.close(linger=0)

@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import contextlib
+import asyncio
 import os
-import queue
-import socket
 import threading
 from collections.abc import Callable
 from logging import getLogger
 from typing import Any, Self, overload
 
 import zmq
+import zmq.asyncio
 from typing_extensions import TypeForm
 from vsengine.futures import UnifiedFuture
 
@@ -63,12 +62,11 @@ class ClientTransport:
         self.on_event = on_event
         self.subscribe_streams = subscribe_streams
 
-        self._ctx: zmq.Context[zmq.Socket[bytes]] | None = None
-        self._socket: zmq.Socket[bytes] | None = None
-        self._waker_r: socket.socket | None = None
-        self._waker_w: socket.socket | None = None
+        self._ctx: zmq.asyncio.Context | None = None
+        self._socket: zmq.asyncio.Socket | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._send_queue: asyncio.Queue[list[bytes] | None] | None = None
 
-        self._send_queue = queue.Queue[list[bytes]]()
         self._pending = dict[int, UnifiedFuture[list[bytes]]]()
         self._next_request_id = 1
         self._lock = threading.Lock()
@@ -112,10 +110,9 @@ class ClientTransport:
 
             self._running = False
 
-            # Wake worker thread immediately to terminate without waiting for poll timeout
-            if self._waker_w:
-                with contextlib.suppress(OSError):
-                    self._waker_w.send(b"\x00")
+            # Cancel active coroutines in the worker loop
+            if self._loop and self._loop.is_running():
+                self._loop.call_soon_threadsafe(self._cancel_tasks)
 
             if self._thread and self._thread.is_alive():
                 self._thread.join(timeout=1.0)
@@ -123,6 +120,10 @@ class ClientTransport:
 
             self._started = False
             logger.debug("Client transport closed")
+
+    def _cancel_tasks(self) -> None:
+        for task in asyncio.all_tasks(self._loop):
+            task.cancel()
 
     @overload
     def send_request(
@@ -293,7 +294,6 @@ class ClientTransport:
         return self.send_request(Command.UNSUBSCRIBE_STREAM).map(lambda resp: resp.is_ok).catch(lambda _: False)
 
     def _start_worker_thread(self) -> None:
-        """Start background worker thread running a native ZeroMQ poller loop."""
         self._ready_event.clear()
         self._thread = threading.Thread(target=self._worker, name="VSRemoteTransport", daemon=True)
         self._thread.start()
@@ -302,7 +302,14 @@ class ClientTransport:
             raise TimeoutError("Timed out waiting for transport worker thread to initialize")
 
     def _worker(self) -> None:
-        self._ctx = zmq.Context()
+        try:
+            asyncio.run(self._async_worker(), loop_factory=asyncio.SelectorEventLoop)
+        finally:
+            self._loop = None
+
+    async def _async_worker(self) -> None:
+        self._loop = asyncio.get_running_loop()
+        self._ctx = zmq.asyncio.Context()
         self._socket = self._ctx.socket(zmq.DEALER)
 
         if self.curve_server_key:
@@ -336,90 +343,68 @@ class ClientTransport:
         self._socket.setsockopt(zmq.RCVHWM, 1024)
         self._socket.connect(self.address)
 
-        self._waker_r, self._waker_w = socket.socketpair()
-        self._waker_r.setblocking(False)
-
-        poller = zmq.Poller()
-        poller.register(self._waker_r, zmq.POLLIN)
+        self._send_queue = asyncio.Queue()
         self._running = True
         self._ready_event.set()
 
         logger.debug("Client transport connected to %s", self.address)
 
-        pending_send: list[bytes] | None = None
+        async def send_loop() -> None:
+            assert self._send_queue is not None
+            assert self._socket is not None
+            while self._running:
+                msg = await self._send_queue.get()
+                if msg is None or not self._running:
+                    break
+                try:
+                    await self._socket.send_multipart(msg)
+                except Exception:
+                    logger.exception("Failed to send message over DEALER socket")
+
+        async def recv_loop() -> None:
+            assert self._socket is not None
+            while self._running:
+                try:
+                    parts = await self._socket.recv_multipart()
+                except (asyncio.CancelledError, zmq.ZMQError):
+                    break
+                except Exception:
+                    logger.exception("Error in client receiver loop")
+                    break
+
+                if not parts or not self._running:
+                    continue
+
+                req_id = int.from_bytes(parts[0], byteorder="big")
+
+                if req_id == 0:
+                    if self.on_event and len(parts) >= 3 and parts[1] == bytes([StatusCode.OK]):
+                        try:
+                            event = unpack_payload(parts[2], RemoteLogRecord | StreamOutputEvent)
+                            self.on_event(event)
+                        except Exception:
+                            logger.exception("Error decoding or handling server stream event")
+                    continue
+
+                with self._lock:
+                    fut = self._pending.pop(req_id, None)
+                if fut and not fut.done():
+                    fut.set_result(parts[1:])
 
         try:
-            while self._running:
-                # Flush queued outgoing messages
-                while pending_send is not None or not self._send_queue.empty():
-                    if pending_send is None:
-                        try:
-                            pending_send = self._send_queue.get_nowait()
-                        except queue.Empty:
-                            break
-                    try:
-                        self._socket.send_multipart(pending_send, flags=zmq.NOBLOCK)
-                        pending_send = None
-                    except zmq.Again:
-                        break
-                    except Exception:
-                        logger.exception("Failed to send message over DEALER socket")
-                        pending_send = None
-
-                # Poll for incoming messages, write-readiness if pending send, or waker notifications
-                poll_flags = zmq.POLLIN | (zmq.POLLOUT if pending_send is not None else 0)
-                poller.register(self._socket, poll_flags)
-
-                socks = dict(poller.poll(timeout=100))
-
-                # Drain waker notification
-                waker_fd = self._waker_r.fileno() if self._waker_r else None
-                if waker_fd is not None and (self._waker_r in socks or waker_fd in socks):
-                    with contextlib.suppress(OSError):
-                        self._waker_r.recv(1024)
-
-                if self._socket in socks and (socks[self._socket] & zmq.POLLIN):
-                    while self._running:
-                        try:
-                            if not (parts := self._socket.recv_multipart(flags=zmq.NOBLOCK)):
-                                break
-                        except (zmq.Again, zmq.ZMQError):
-                            break
-                        except Exception:
-                            logger.exception("Error in client receiver loop")
-                            break
-
-                        req_id = int.from_bytes(parts[0], byteorder="big")
-
-                        if req_id == 0:
-                            if self.on_event and len(parts) >= 3 and parts[1] == bytes([StatusCode.OK]):
-                                try:
-                                    event = unpack_payload(parts[2], RemoteLogRecord | StreamOutputEvent)
-                                    self.on_event(event)
-                                except Exception:
-                                    logger.exception("Error decoding or handling server stream event")
-                            continue
-
-                        with self._lock:
-                            fut = self._pending.pop(req_id, None)
-                        if fut and not fut.done():
-                            fut.set_result(parts[1:])
+            await asyncio.gather(send_loop(), recv_loop())
+        except asyncio.CancelledError:
+            pass
         finally:
             self._ready_event.set()
 
-            with contextlib.suppress(Exception):
+            if self._socket:
                 self._socket.close(linger=0)
-            with contextlib.suppress(Exception):
-                self._ctx.term()
-            with contextlib.suppress(Exception):
-                self._waker_r.close()
-            with contextlib.suppress(Exception):
-                self._waker_w.close()
+                self._socket = None
 
-            self._socket = None
-            self._ctx = None
-            self._waker_r = None
-            self._waker_w = None
+            if self._ctx:
+                self._ctx.term()
+                self._ctx = None
 
             with self._lock:
                 for pending_fut in self._pending.values():
@@ -428,17 +413,16 @@ class ClientTransport:
                 self._pending.clear()
 
     def _send_message(self, req_id: int, cmd: Command, payload_bytes: bytes) -> None:
-        """Enqueue message to be sent through the DEALER socket and wake worker immediately."""
         if not self._started:
             raise RuntimeError("Transport is not started")
-        if not self._running:
+        if not self._running or self._loop is None or self._send_queue is None:
             raise RuntimeError("Transport is not connected")
 
         parts = [req_id.to_bytes(4, byteorder="big"), bytes([cmd.value]), payload_bytes]
         if self.auth_token:
             parts.append(self.auth_token.encode("utf-8"))
 
-        self._send_queue.put(parts)
-        if self._waker_w:
-            with contextlib.suppress(OSError):
-                self._waker_w.send(b"\x00")
+        try:
+            self._loop.call_soon_threadsafe(self._send_queue.put_nowait, parts)
+        except RuntimeError:
+            raise RuntimeError("ClientTransport is closed")
