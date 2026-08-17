@@ -4,19 +4,11 @@ Remote execution server and frame proxy for VapourSynth.
 
 `vs-remote` runs VapourSynth scripts on a remote machine (e.g. headless server or workstation) and streams frames to a local client for previewing or encoding.
 
----
-
-## Features
-
-`vs-remote` mirrors remote VapourSynth clips as local `vs.VideoNode` proxies with on-demand streaming and asynchronous frame prefetching. Communication runs over ZeroMQ (`ROUTER`/`DEALER` over TCP or IPC).
-
-Frame planes transfer uncompressed or compressed via Zstandard (`zstd`), with primitive frame properties serialized via MessagePack. Remote `stdout`, `stderr` and logs messages stream directly to the client. Multiple outputs registered with `set_output()` can be listed, named, and consumed independently.
-
----
+It mirrors remote clips as local `VideoNode` proxies, streaming frames on demand with asynchronous prefetching, uses ZeroMQ for communication and supports multiple independent outputs.
 
 ## Limitations
 
-- Only `vs.VideoNode` outputs are supported.
+- AudioNode outputs are not supported.
 - Variable resolution and format clips are not supported.
 - Frame property serialization only preserves primitive types (`int`, `float`, `str`, `bytes`, and lists of primitives).
 
@@ -87,8 +79,6 @@ vsremote pipe tcp://192.168.1.100:5555 --output 0 | ffmpeg -i - -c:v libx264 out
 
 ## CLI Reference
 
-`vsremote` provides a CLI for server hosting, diagnostic checks, and pipeline streaming.
-
 | Command  | Description                                           | Example                                                                               |
 | :------- | :---------------------------------------------------- | :------------------------------------------------------------------------------------ |
 | `serve`  | Host a `.vpy` script or execution server              | `vsremote serve script.vpy --address tcp://0.0.0.0:5555`                              |
@@ -126,9 +116,10 @@ clip = vsremote.source(
 Client for output introspection, dynamic script loading, and multi-output retrieval:
 
 ```python
+import asyncio
+
 import vsremote
 
-# Usable as a synchronous or asynchronous context manager
 with vsremote.RemoteClient("tcp://192.168.1.100:5555") as client:
     # Introspect available outputs
     outputs = client.list_outputs().result()
@@ -139,10 +130,16 @@ with vsremote.RemoteClient("tcp://192.168.1.100:5555") as client:
     clip0 = client.get_output(0)
     all_clips = client.get_outputs()  # dict[int, vs.VideoNode]
 
-    # Dynamic control (requires server started with --allow-eval)
-    client.reload().result()  # Reload script from disk
-    client.load_script("/path/to/another.vpy").result()  # Switch active script
-    client.load_code("import vapoursynth as vs; clip.set_output()").result()
+async def main() -> None:
+    # Also usable as asynchronous context manager
+    async with vsremote.RemoteClient("tcp://192.168.1.100:5555") as client:
+        # Dynamic control (requires server started with --allow-eval)
+        await client.reload()  # Reload script from disk
+        await client.load_script("/path/to/another.vpy")  # Switch active script
+        await client.load_code("import vapoursynth as vs; vs.core.std.BlankClip().set_output()")
+
+asyncio.run(main())
+
 ```
 
 ---
@@ -162,8 +159,6 @@ core = vs.core
 src = core.bs.VideoSource("source.mkv")
 noartifact = core.noise.Add(src, var=2000)
 
-# vsremote captures variable names automatically ("src", "noartifact")
-# or accepts explicit names: set_output(noartifact, name="Filtered")
 set_output(src)
 set_output(noartifact)
 
@@ -181,14 +176,23 @@ Dynamic script loading (`load_script`) and arbitrary code evaluation (`load_code
 
 Remote connections can be authenticated with a pre-shared token (`--auth-token` or `VSREMOTE_AUTH_TOKEN`) and encrypted using CurveZMQ (Curve25519) keypairs:
 
+Server side:
+
 ```bash
-# 1. Generate keypair
+# Generate keypair
 vsremote keygen
 
-# 2. Start encrypted and authenticated server
+# Start encrypted and authenticated server
 vsremote serve script.vpy --address tcp://0.0.0.0:5555 --curve-secret-key "<SERVER_SECRET_KEY>" --auth-token "my-secret-token"
 
-# 3. Connect client securely
+# Or with the --curve parameter
+vsremote serve script.vpy --address tcp://0.0.0.0:5555 --curve --auth-token "my-secret-token"
+```
+
+Client side:
+
+```bash
+# Connect client securely
 vsremote info tcp://192.168.1.100:5555 --curve-server-key "<SERVER_PUBLIC_KEY>" --auth-token "my-secret-token"
 ```
 
