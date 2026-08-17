@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
+import msgspec
 import pytest
 import vapoursynth as vs
 
@@ -12,6 +15,7 @@ from vsremote.protocol import (
     PlaneInfo,
     RemoteLogRecord,
     RequestEnvelope,
+    ResponseEnvelope,
     StatusCode,
     StreamOutputEvent,
     StreamSubscribeRequest,
@@ -53,6 +57,14 @@ def test_clip_info_serialization() -> None:
     assert info2 == info
 
 
+def test_clip_info_no_format_error() -> None:
+    class FakeClipNoFormat:
+        format = None
+
+    with pytest.raises(ValueError, match="Variable format clips are not supported by vs-remote"):
+        ClipInfo.from_clip(FakeClipNoFormat())  # type: ignore[arg-type]
+
+
 def test_frame_header_serialization() -> None:
     header = FrameHeader(
         status=StatusCode.OK,
@@ -76,19 +88,27 @@ def test_frame_header_serialization() -> None:
 
 
 def test_sanitize_props() -> None:
+    custom_obj = object()
+    nested_bad_list = [custom_obj]
     raw = {
         "int": 10,
         "float": 3.14,
         "str": "test",
         "bytes": b"binary",
         "list": [1, 2, "three", b"bytes"],
+        "custom": custom_obj,
+        "bad_list": nested_bad_list,
     }
     clean = sanitize_props(raw)
     assert clean["list"] == [1, 2, "three", b"bytes"]
+    assert clean["custom"] == repr(custom_obj)
+    assert clean["bad_list"] == repr(nested_bad_list)
 
     # Verify MsgPack can pack and unpack it cleanly
     packed = pack_payload(clean)
-    assert unpack_payload(packed)["bytes"] == b"binary"
+    unpacked = unpack_payload(packed)
+    assert unpacked["bytes"] == b"binary"
+    assert unpacked["custom"] == repr(custom_obj)
 
 
 def test_request_envelope_from_frames() -> None:
@@ -125,6 +145,17 @@ def test_request_envelope_from_frames() -> None:
     assert req_extra.extra_frames == [b"secret_token_123", b"extra2"]
     assert req_extra.auth_token == "secret_token_123"
 
+    # Extra frame with invalid UTF-8 (fails auth token decode gracefully)
+    frames_invalid_utf8 = [
+        b"client-id-4",
+        (3).to_bytes(4, "big"),
+        bytes([Command.PING.value]),
+        b"",
+        b"\xff\xfe\xfd",
+    ]
+    req_invalid_utf8 = RequestEnvelope.from_frames(frames_invalid_utf8)
+    assert req_invalid_utf8.auth_token is None
+
     # Malformed: less than 3 frames
     with pytest.raises(ValueError, match="Malformed multipart request"):
         RequestEnvelope.from_frames([b"id", b"req_id"])
@@ -132,6 +163,37 @@ def test_request_envelope_from_frames() -> None:
     # Invalid command byte
     with pytest.raises(ValueError, match="Unknown command byte"):
         RequestEnvelope.from_frames([b"id", (1).to_bytes(4, "big"), bytes([255])])
+
+
+def test_response_envelope_from_frames() -> None:
+    # 2-frame response
+    frames_2 = [bytes([StatusCode.OK]), pack_payload({"status": "healthy"})]
+    resp_2 = ResponseEnvelope.from_frames(frames_2)
+    assert resp_2.is_ok is True
+    assert resp_2.status == StatusCode.OK
+    assert resp_2.payload == pack_payload({"status": "healthy"})
+
+    # Single frame response (status byte only)
+    frames_single = [bytes([StatusCode.OK])]
+    resp_single = ResponseEnvelope.from_frames(frames_single)
+    assert resp_single.is_ok is True
+    assert resp_single.payload_bytes == b""
+    assert resp_single.extra_frames == []
+
+    # Empty frames raises ValueError
+    with pytest.raises(ValueError, match="Malformed multipart response"):
+        ResponseEnvelope.from_frames([])
+
+    # Invalid status code byte
+    with pytest.raises(ValueError, match="Unknown status code byte"):
+        ResponseEnvelope.from_frames([bytes([250])])
+
+    # Error status with typed target falling back to untyped payload decoding
+    err_frames = [bytes([StatusCode.ERROR]), pack_payload({"error": "Failed to load script"})]
+    err_resp = ResponseEnvelope.from_frames(err_frames, ClipInfo)
+    assert err_resp.is_ok is False
+    assert err_resp.status == StatusCode.ERROR
+    assert cast(dict[str, Any], err_resp.payload) == {"error": "Failed to load script"}
 
 
 def test_unpack_payload_typed_and_empty() -> None:
@@ -145,6 +207,13 @@ def test_unpack_payload_typed_and_empty() -> None:
     assert frame_req.n == 0
     assert frame_req.output_index == 0
     assert frame_req.compression == "zstd"
+
+    # Struct with required fields: calling Target() raises TypeError, fallback decodes empty msgpack map
+    class StructWithRequired(msgspec.Struct):
+        val: int
+
+    with pytest.raises(msgspec.ValidationError):
+        unpack_payload(b"", StructWithRequired)
 
     # Empty byte buffer with untyped default
     assert unpack_payload(b"") == {}

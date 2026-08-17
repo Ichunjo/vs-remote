@@ -3,20 +3,24 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, override
+from unittest.mock import MagicMock
 
 import pytest
 import vapoursynth as vs
 import vsengine.video
 import zmq
+import zmq.asyncio
 from vsengine.policy import ManagedEnvironment, Policy
 
 from vsremote.client import ClientTransport, RemoteClient, source
-from vsremote.protocol.constants import Command, StatusCode
-from vsremote.server import RemotePolicy, ScriptRunner
+from vsremote.protocol import Command, RemoteLogRecord, StatusCode, StreamEvent, StreamOutputEvent, pack_payload
+from vsremote.server import LogForwarder, RemotePolicy, ScriptRunner, ServerDaemon
+from vsremote.utils import setup_logging
 
 if TYPE_CHECKING:
     from conftest import ServerFactory
@@ -248,8 +252,7 @@ def test_script_runner_with_env_factory(tmp_path: Path, vpy_env_factory: Callabl
         encoding="utf-8",
     )
 
-    env = vpy_env_factory()
-    runner = ScriptRunner.from_script(script_file, environment=env)
+    runner = ScriptRunner.from_script(script_file, environment=vpy_env_factory())
     try:
         outputs = runner.list_outputs()
         assert len(outputs) == 1
@@ -778,3 +781,331 @@ def test_strided_copy_non_aligned(server: ServerFactory) -> None:
         orig_frame = unaligned_clip.get_frame(0)
         for p in range(3):
             assert bytes(frame[p]) == bytes(orig_frame[p])
+
+
+@pytest.mark.vpy("initial-core")
+def test_client_address_normalization() -> None:
+    client = RemoteClient("127.0.0.1:5555")
+    assert client.address == "tcp://127.0.0.1:5555"
+
+    trans = ClientTransport("127.0.0.1:5555")
+    assert trans.address == "tcp://127.0.0.1:5555"
+
+
+@pytest.mark.vpy("initial-core")
+def test_source_reuse_transport(running_server: tuple[str, int]) -> None:
+    host, port = running_server
+    address = f"tcp://{host}:{port}"
+    with ClientTransport(address) as trans:
+        clip = source(address, output=0, transport=trans)
+        assert clip.width == 128
+        frame = clip.get_frame(0)
+        assert frame.width == 128
+
+
+def test_client_stream_event_handlers() -> None:
+    # Test stream event when stream target is None (returns early)
+    client = RemoteClient("tcp://127.0.0.1:5555", stdout=None, stderr=None)
+    client._handle_event(StreamOutputEvent(stream="stdout", text="ignore"))
+
+    # Test stream event when stream target raises exception (logged)
+    faulty_stream = MagicMock()
+    faulty_stream.write.side_effect = OSError("Disk full")
+    client_faulty = RemoteClient("tcp://127.0.0.1:5555", stdout=faulty_stream)
+    client_faulty._handle_event(StreamOutputEvent(stream="stdout", text="error"))
+    assert faulty_stream.write.called
+
+
+@pytest.mark.vpy("initial-core")
+def test_client_seeking_future_pruning(server: ServerFactory) -> None:
+    # Create 100 frame clip
+    clip = core.std.BlankClip(width=64, height=64, length=100)
+    with server([clip]) as (host, port):
+        # Connect with prefetch=2
+        proxy = source(f"tcp://{host}:{port}", output=0, prefetch=2)
+        # Non-contiguous fetches add prefetches without popping previous prefetches
+        proxy.get_frame(0)
+        proxy.get_frame(10)
+        proxy.get_frame(20)
+        proxy.get_frame(30)
+        proxy.get_frame(40)
+        # Now len(inflight) is 10 > 2 * 4 (8). Jump to 90 to trigger pruning
+        proxy.get_frame(90)
+
+
+def test_transport_error_states() -> None:
+    trans = ClientTransport("tcp://127.0.0.1:5555")
+    # _send_message when not started
+    with pytest.raises(RuntimeError, match="Transport is not started"):
+        trans._send_message(1, Command.PING, b"")
+
+    # send_request when started but running is False
+    trans._started = True
+    trans._running = False
+    fut = trans.send_request(Command.PING)
+    with pytest.raises(RuntimeError, match="ClientTransport is closed"):
+        fut.result()
+
+
+@pytest.mark.asyncio(loop_factories=["custom"])
+@pytest.mark.vpy("initial-core")
+async def test_transport_unsubscribe_stream(server: ServerFactory, test_clip: vs.VideoNode) -> None:
+    async with server([test_clip]) as (host, port), ClientTransport(f"tcp://{host}:{port}") as trans:
+        assert (await trans.ping()) is True
+        assert (await trans.unsubscribe_stream()) is True
+
+
+def test_curvezmq_explicit_client_keys_and_bytes() -> None:
+    pub, sec = zmq.curve_keypair()
+    server_pub, _ = zmq.curve_keypair()
+
+    # String keys
+    client_str = RemoteClient(
+        "tcp://127.0.0.1:5555",
+        curve_server_key=server_pub.decode("ascii"),
+        curve_public_key=pub.decode("ascii"),
+        curve_secret_key=sec.decode("ascii"),
+    )
+    assert client_str.curve_public_key == pub.decode("ascii")
+
+    # Bytes keys
+    client_bytes = RemoteClient(
+        "tcp://127.0.0.1:5555",
+        curve_server_key=server_pub,
+        curve_public_key=pub,
+        curve_secret_key=sec,
+    )
+    assert client_bytes.curve_public_key == pub
+
+
+@pytest.mark.vpy("initial-core")
+def test_curvezmq_explicit_keys_connected(server: ServerFactory, test_clip: vs.VideoNode) -> None:
+    server_public, server_secret = zmq.curve_keypair()
+    client_public, client_secret = zmq.curve_keypair()
+
+    with (
+        server([test_clip], curve_secret_key=server_secret, curve_public_key=server_public) as (host, port),
+        ClientTransport(
+            f"tcp://{host}:{port}",
+            curve_server_key=server_public,
+            curve_public_key=client_public,
+            curve_secret_key=client_secret,
+        ) as trans,
+    ):
+        assert trans.ping().result() is True
+
+
+@pytest.mark.vpy("initial-core")
+def test_transport_reload_failure_handling(server: ServerFactory, test_clip: vs.VideoNode) -> None:
+    # Server with runner that has no script file -> reload fails
+    with (
+        server([test_clip]) as (host, port),
+        ClientTransport(f"tcp://{host}:{port}") as trans,
+        pytest.raises(RuntimeError, match="Failed to reload script"),
+    ):
+        trans.reload().result()
+
+
+@pytest.mark.asyncio(loop_factories=["custom"])
+@pytest.mark.vpy("no-policy")
+async def test_transport_on_event_error_handling(server: ServerFactory, tmp_path: Path) -> None:
+    script_file = tmp_path / "event_err.vpy"
+    script_file.write_text(
+        "import logging\nimport vapoursynth as vs\ncore = vs.core\ncore.std.BlankClip().set_output(0)\n"
+        "logging.getLogger('t').warning('msg')\n",
+        encoding="utf-8",
+    )
+
+    def faulty_handler(evt: StreamEvent) -> None:
+        raise ValueError("Handler error")
+
+    async with (
+        server(script_file) as (host, port),
+        ClientTransport(f"tcp://{host}:{port}", on_event=faulty_handler) as trans,
+    ):
+        assert (await trans.ping()) is True
+        await asyncio.sleep(0.1)
+
+
+def test_server_daemon_address_normalization() -> None:
+    runner = ScriptRunner()
+    daemon = ServerDaemon(runner, "127.0.0.1:5555")
+    assert daemon.address == "tcp://127.0.0.1:5555"
+
+
+@pytest.mark.asyncio(loop_factories=["custom"])
+@pytest.mark.vpy("initial-core")
+async def test_server_daemon_invalid_commands_and_payloads(server: ServerFactory, test_clip: vs.VideoNode) -> None:
+    async with server([test_clip], allow_eval=True) as (host, port):
+        ctx = zmq.asyncio.Context()
+        sock = ctx.socket(zmq.DEALER)
+        sock.connect(f"tcp://{host}:{port}")
+
+        try:
+            # Malformed request (<3 frames) -> INVALID_COMMAND
+            req_id_1 = (101).to_bytes(4, "big")
+            await sock.send_multipart([req_id_1])
+            reply_1 = await sock.recv_multipart()
+            assert reply_1[0] == req_id_1
+            assert reply_1[1] == bytes([StatusCode.INVALID_COMMAND])
+
+            # GET_CLIP_INFO with corrupt payload -> INVALID_PAYLOAD
+            req_id_2 = (102).to_bytes(4, "big")
+            await sock.send_multipart([req_id_2, bytes([Command.GET_CLIP_INFO.value]), b"\xff\xff\xff"])
+            reply_2 = await sock.recv_multipart()
+            assert reply_2[0] == req_id_2
+            assert reply_2[1] == bytes([StatusCode.INVALID_PAYLOAD])
+
+            # GET_FRAME with corrupt payload -> INVALID_PAYLOAD
+            req_id_3 = (103).to_bytes(4, "big")
+            await sock.send_multipart([req_id_3, bytes([Command.GET_FRAME.value]), b"\xff\xff\xff"])
+            reply_3 = await sock.recv_multipart()
+            assert reply_3[0] == req_id_3
+            assert reply_3[1] == bytes([StatusCode.INVALID_PAYLOAD])
+
+            # GET_FRAME with invalid output index -> NOT_FOUND
+            req_id_4 = (104).to_bytes(4, "big")
+            bad_frame_req = pack_payload({"output_index": 999, "n": 0, "compression": "zstd"})
+            await sock.send_multipart([req_id_4, bytes([Command.GET_FRAME.value]), bad_frame_req])
+            reply_4 = await sock.recv_multipart()
+            assert reply_4[0] == req_id_4
+            assert reply_4[1] == bytes([StatusCode.NOT_FOUND])
+
+            # RELOAD with corrupt payload -> INVALID_PAYLOAD
+            req_id_5 = (105).to_bytes(4, "big")
+            await sock.send_multipart([req_id_5, bytes([Command.RELOAD.value]), b"\xff\xff\xff"])
+            reply_5 = await sock.recv_multipart()
+            assert reply_5[0] == req_id_5
+            assert reply_5[1] == bytes([StatusCode.INVALID_PAYLOAD])
+
+            # UNSUBSCRIBE_STREAM command
+            req_id_6 = (106).to_bytes(4, "big")
+            await sock.send_multipart([req_id_6, bytes([Command.UNSUBSCRIBE_STREAM.value]), b""])
+            reply_6 = await sock.recv_multipart()
+            assert reply_6[0] == req_id_6
+            assert reply_6[1] == bytes([StatusCode.OK])
+
+            # CLOSE command
+            req_id_7 = (107).to_bytes(4, "big")
+            await sock.send_multipart([req_id_7, bytes([Command.CLOSE.value]), b""])
+            reply_7 = await sock.recv_multipart()
+            assert reply_7[0] == req_id_7
+            assert reply_7[1] == bytes([StatusCode.OK])
+            assert reply_7[2] == b"BYE"
+        finally:
+            sock.close(linger=0)
+            ctx.term()
+
+
+def test_server_daemon_send_multipart_closed() -> None:
+    daemon = ServerDaemon(ScriptRunner())
+    with pytest.raises(RuntimeError):
+        asyncio.run(daemon._send_multipart([b"test"]))
+
+
+def test_log_forwarder_arg_types_and_errors() -> None:
+    events = list[StreamEvent]()
+    forwarder = LogForwarder(events.append)
+
+    # Non-serializable tuple args
+    rec_tuple = logging.LogRecord("test", logging.INFO, "path", 1, "Tuple: %s", (object(),), None)
+    forwarder.emit(rec_tuple)
+    assert len(events) == 1
+    assert isinstance(events[-1], RemoteLogRecord)
+
+    # Dict args (serializable)
+    rec_dict = logging.LogRecord("test", logging.INFO, "path", 1, "Dict", ({"k": "v"},), None)
+    forwarder.emit(rec_dict)
+    assert len(events) == 2
+
+    # Dict args (non-serializable)
+    rec_dict_unserializable = logging.LogRecord("test", logging.INFO, "path", 1, "Dict", ({"k": object()},), None)
+    forwarder.emit(rec_dict_unserializable)
+    assert len(events) == 3
+
+    # Scalar non-tuple non-dict args
+    rec_scalar = logging.LogRecord("test", logging.INFO, "path", 1, "Scalar", (), None)
+    rec_scalar.args = 9999  # type: ignore[assignment]
+    forwarder.emit(rec_scalar)
+    assert len(events) == 4
+
+    # exc_info without exc_text
+    try:
+        raise ValueError("Simulated failure")
+    except ValueError:
+        exc_info = sys.exc_info()
+    rec_exc = logging.LogRecord("test", logging.ERROR, "path", 1, "Error", (), exc_info)
+    forwarder.emit(rec_exc)
+    assert len(events) == 5
+    assert events[-1].exc_text is not None
+    assert "Simulated failure" in events[-1].exc_text
+
+    # Dispatch raising exception triggering handleError
+    def broken_dispatch(evt: StreamEvent) -> None:
+        raise RuntimeError("Dispatch failed")
+
+    broken_forwarder = LogForwarder(broken_dispatch)
+    broken_forwarder.emit(rec_tuple)
+
+
+def test_script_runner_properties_and_errors() -> None:
+    runner = ScriptRunner()
+
+    # script_path is None
+    assert runner.script_path is None
+
+    # reload() without script raises RuntimeError
+    with pytest.raises(RuntimeError, match="No script file is associated"):
+        runner.reload()
+
+    # get_clip(999) raises KeyError
+    with pytest.raises(KeyError, match="Output index 999 not found"):
+        runner.get_clip(999)
+
+    # get_clip_info(999) raises KeyError
+    with pytest.raises(KeyError, match="Output index 999 not found"):
+        runner.get_clip_info(999)
+
+    # _extract_outputs() raises RuntimeError when _script is None
+    with pytest.raises(RuntimeError, match="Script doesn't exist"):
+        runner._extract_outputs()
+
+    # environment raises RuntimeError when environment is None
+    runner._environment = None
+    with pytest.raises(RuntimeError, match="No environment has been passed"):
+        _ = runner.environment
+
+
+@pytest.mark.vpy("no-policy")
+def test_script_runner_audio_node_filtering(tmp_path: Path) -> None:
+    script_file = tmp_path / "audio_video.vpy"
+    script_file.write_text(
+        "import vapoursynth as vs\n"
+        "core = vs.core\n"
+        "clip = core.std.BlankClip(width=160, height=120, length=5)\n"
+        "clip.set_output(0)\n"
+        "if hasattr(core.std, 'BlankAudio'):\n"
+        "    audio = core.std.BlankAudio()\n"
+        "    audio.set_output(1)\n",
+        encoding="utf-8",
+    )
+
+    runner = ScriptRunner.from_script(script_file)
+    try:
+        outputs = runner.list_outputs()
+        assert len(outputs) == 1
+        assert outputs[0].index == 0
+        assert outputs[0].info.width == 160
+    finally:
+        runner.close()
+
+
+def test_setup_logging_no_handlers() -> None:
+    root = logging.getLogger()
+    orig = list(root.handlers)
+    root.handlers.clear()
+    try:
+        setup_logging(level=logging.INFO)
+        assert len(root.handlers) >= 1
+    finally:
+        root.handlers = orig
