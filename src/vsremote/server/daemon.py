@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import secrets
 import threading
 import traceback
+import urllib.parse
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from logging import getLogger
@@ -131,6 +133,20 @@ class ServerDaemon:
             bool(self.auth_token),
             bool(self.curve_secret_key),
         )
+
+        if not _is_loopback_address(self.address):
+            if not (self.auth_token or self.curve_secret_key):
+                if self.allow_eval:
+                    logger.warning("Server bound to %s with allow_eval=True and NO auth/encryption", self.address)
+                    logger.warning("Anyone on the network can execute arbitrary code.")
+                else:
+                    logger.warning("Server bound to %s without auth or encryption.", self.address)
+            elif self.allow_eval:
+                logger.warning(
+                    "Server bound to %s with allow_eval=True. "  # no fmt
+                    "Authenticated clients can execute arbitrary code.",
+                    self.address,
+                )
 
         if ready_event is not None:
             ready_event.set()
@@ -484,3 +500,24 @@ def _extract_and_compress_planes(frame: vs.VideoFrame, compression: Compression)
             planes.append(compress_plane(plane, compression))
 
     return planes
+
+
+def _is_loopback_address(address: str) -> bool:
+    if address.startswith(("ipc://", "inproc://")):
+        return True
+
+    if not address.startswith("tcp://"):
+        address = f"tcp://{address}"
+
+    hostname = urllib.parse.urlsplit(address).hostname
+
+    if not hostname:
+        return False
+
+    if hostname.lower() in ("localhost", "ip6-localhost", "ip6-loopback"):
+        return True
+
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False

@@ -37,7 +37,7 @@ pip install vs-remote
 On the machine hosting VapourSynth and source media:
 
 ```bash
-vsremote serve path/to/script.vpy --address tcp://0.0.0.0:5555
+vsremote serve path/to/script.vpy --address tcp://127.0.0.1:5555
 ```
 
 Or programmatically in Python:
@@ -45,7 +45,7 @@ Or programmatically in Python:
 ```python
 import vsremote
 
-vsremote.serve("script.vpy", address="tcp://0.0.0.0:5555")
+vsremote.serve("script.vpy", address="tcp://127.0.0.1:5555")
 ```
 
 ---
@@ -81,7 +81,7 @@ vsremote pipe tcp://192.168.1.100:5555 --output 0 | ffmpeg -i - -c:v libx264 out
 
 | Command  | Description                                           | Example                                                                               |
 | :------- | :---------------------------------------------------- | :------------------------------------------------------------------------------------ |
-| `serve`  | Host a `.vpy` script or execution server              | `vsremote serve script.vpy --address tcp://0.0.0.0:5555`                              |
+| `serve`  | Host a `.vpy` script or execution server              | `vsremote serve script.vpy --address tcp://127.0.0.1:5555`                            |
 | `ping`   | Test connection and measure round-trip latency        | `vsremote ping tcp://192.168.1.100:5555`                                              |
 | `info`   | Display metadata for all outputs on the remote server | `vsremote info tcp://192.168.1.100:5555`                                              |
 | `pipe`   | Stream frames directly to stdout as Y4M or raw planes | `vsremote pipe tcp://192.168.1.100:5555 --y4m --output 0 \| x265 --y4m - -o out.hevc` |
@@ -171,31 +171,33 @@ if is_preview():
 
 ## Security
 
-The server binds to `127.0.0.1` by default.
+VapourSynth scripts are Python code. Evaluating untrusted `.vpy` scripts or enabling `--allow-eval` grants arbitrary code execution privileges within the server process.
 
-Dynamic script loading (`load_script`) and arbitrary code evaluation (`load_code`) are disabled unless the server is started with `--allow-eval`.
+- **Defaults**: The server binds to `127.0.0.1` with `--allow-eval` disabled by default.
+- **Remote / WAN (Recommended)**: Use SSH port forwarding so no ZeroMQ ports are exposed to the internet:
 
-Remote connections can be authenticated with a pre-shared token (`--auth-token` or `VSREMOTE_AUTH_TOKEN`) and encrypted using CurveZMQ (Curve25519) keypairs:
+    ```bash
+    # Remote server (bind to localhost)
+    vsremote serve script.vpy --address tcp://127.0.0.1:5555
 
-Server side:
+    # Local client (SSH tunnel)
+    ssh -N -L 5555:127.0.0.1:5555 user@remote-server.com
 
-```bash
-# Generate keypair
-vsremote keygen
+    # Connect locally
+    vsremote info --address tcp://127.0.0.1:5555
+    ```
 
-# Start encrypted and authenticated server
-vsremote serve script.vpy --address tcp://0.0.0.0:5555 --curve-secret-key "<SERVER_SECRET_KEY>" --auth-token "my-secret-token"
+- **Direct LAN**: Enable CurveZMQ (Curve25519) encryption and pre-shared token authentication:
 
-# Or with the --curve parameter
-vsremote serve script.vpy --address tcp://0.0.0.0:5555 --curve --auth-token "my-secret-token"
-```
+    ```bash
+    # Server
+    vsremote serve script.vpy --address tcp://192.168.1.100:5555 --curve --auth-token "secret"
 
-Client side:
+    # Client
+    vsremote info --address tcp://192.168.1.100:5555 --curve-server-key "<SERVER_PUBLIC_KEY>" --auth-token "secret"
+    ```
 
-```bash
-# Connect client securely
-vsremote info tcp://192.168.1.100:5555 --curve-server-key "<SERVER_PUBLIC_KEY>" --auth-token "my-secret-token"
-```
+- **Untrusted Scripts/Code**: Run `vsremote` in a rootless container with read-only mounts and dropped capabilities.
 
 ---
 

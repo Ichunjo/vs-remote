@@ -29,6 +29,7 @@ from vsremote.exceptions import (
 )
 from vsremote.protocol import Command, RemoteLogRecord, StatusCode, StreamEvent, StreamOutputEvent, pack_payload
 from vsremote.server import LogForwarder, RemotePolicy, ScriptRunner, ServerDaemon
+from vsremote.server.daemon import _is_loopback_address
 from vsremote.utils import setup_logging
 
 if TYPE_CHECKING:
@@ -1118,3 +1119,18 @@ def test_setup_logging_no_handlers() -> None:
         assert len(root.handlers) >= 1
     finally:
         root.handlers = orig
+
+
+def test_is_loopback_address() -> None:
+    assert _is_loopback_address("tcp://127.0.0.1:5555") is True
+    assert _is_loopback_address("tcp://127.0.1.1:5555") is True
+    assert _is_loopback_address("tcp://localhost:5555") is True
+    assert _is_loopback_address("tcp://[::1]:5555") is True
+    assert _is_loopback_address("ipc:///tmp/vsremote.sock") is True
+    assert _is_loopback_address("inproc://vsremote") is True
+
+    assert _is_loopback_address("tcp://0.0.0.0:5555") is False
+    assert _is_loopback_address("tcp://*:5555") is False
+    assert _is_loopback_address("tcp://192.168.1.100:5555") is False
+    assert _is_loopback_address("tcp://10.0.0.1:5555") is False
+    assert _is_loopback_address("tcp://example.com:5555") is False
