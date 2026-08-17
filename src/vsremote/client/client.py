@@ -305,7 +305,9 @@ def create_remote_vnode(
         header, plane_parts = fut.result(timeout=30.0)
 
         if header.status != StatusCode.OK:
-            raise RuntimeError(f"Failed to fetch remote frame (n={n}, output={output_index}):\n{header.error_message}")
+            header.status.raise_for_status(
+                f"Failed to fetch remote frame (n={n}, output={output_index}):\n{header.error_message}"
+            )
 
         f_out = f.copy()
 

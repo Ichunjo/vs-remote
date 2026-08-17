@@ -1,7 +1,16 @@
 from __future__ import annotations
 
 from .codec import compress_plane, decompress_plane, pack_payload, sanitize_props, unpack_payload
-from .constants import DEFAULT_ADDRESS, DEFAULT_HOST, DEFAULT_PORT, PROTOCOL_VERSION, Command, Compression, StatusCode
+from .constants import (
+    DEFAULT_ADDRESS,
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    PROTOCOL_VERSION,
+    Command,
+    Compression,
+    StatusCode,
+    StatusCodeError,
+)
 from .messages import (
     ClipInfo,
     FrameHeader,
@@ -40,6 +49,7 @@ __all__ = [
     "RequestEnvelope",
     "ResponseEnvelope",
     "StatusCode",
+    "StatusCodeError",
     "StreamEvent",
     "StreamOutputEvent",
     "StreamSubscribeRequest",

@@ -12,6 +12,7 @@ import zmq.asyncio
 from typing_extensions import TypeForm
 from vsengine.futures import UnifiedFuture
 
+from ..exceptions import RemoteTimeoutError, TransportClosedError, TransportNotConnectedError, TransportNotStartedError
 from ..protocol import (
     DEFAULT_ADDRESS,
     ClipInfo,
@@ -167,10 +168,10 @@ class ClientTransport:
             return ResponseEnvelope.from_frames(frames, response_type)
 
         if not self._started:
-            return fut.reject(RuntimeError("Transport is not started")).map(to_response_envelope)
+            return fut.reject(TransportNotStartedError("Transport is not started"))
 
         if not self._running:
-            return fut.reject(RuntimeError("ClientTransport is closed")).map(to_response_envelope)
+            return fut.reject(TransportClosedError("ClientTransport is closed"))
 
         with self._lock:
             req_id = self._next_request_id
@@ -191,71 +192,52 @@ class ClientTransport:
         """Check connection liveness to the remote server."""
         return (
             self.send_request(Command.PING)
-            .map(lambda resp: resp.is_ok and resp.payload == b"PONG")
+            .map(lambda resp: resp.status == StatusCode.OK and resp.payload == b"PONG")
             .catch(lambda _: False)
         )
 
     def list_outputs(self) -> UnifiedFuture[list[OutputItem]]:
         """List all available VideoNode outputs on the server."""
-
-        def parse(resp: ResponseEnvelope[list[OutputItem]]) -> list[OutputItem]:
-            if not resp.is_ok:
-                raise RuntimeError(f"Failed to list outputs: {resp.payload!r}")
-            return resp.payload
-
-        return self.send_request(Command.LIST_OUTPUTS, response_type=list[OutputItem]).map(parse)
+        return self.send_request(
+            Command.LIST_OUTPUTS,
+            response_type=list[OutputItem],
+        ).map(lambda r: r.raise_for_status("Failed to list outputs").payload)
 
     def load_script(self, script_path: str | os.PathLike[str], chdir: bool = True) -> UnifiedFuture[list[OutputItem]]:
         """Request the remote server to load or switch to a script file."""
-
-        def parse(resp: ResponseEnvelope[list[OutputItem]]) -> list[OutputItem]:
-            if not resp.is_ok:
-                raise RuntimeError(f"Failed to load script {script_path}: {resp.payload!r}")
-            return resp.payload
 
         return self.send_request(
             Command.LOAD_SCRIPT,
             LoadScriptRequest(os.fspath(script_path), chdir),
             response_type=list[OutputItem],
-        ).map(parse)
+        ).map(lambda r: r.raise_for_status(f"Failed to load script {script_path}").payload)
 
     def load_code(self, code: str, filename: str = "<remote_code>") -> UnifiedFuture[list[OutputItem]]:
         """Request the remote server to execute Python/VapourSynth code."""
-
-        def parse(resp: ResponseEnvelope[list[OutputItem]]) -> list[OutputItem]:
-            if not resp.is_ok:
-                raise RuntimeError(f"Failed to load code: {resp.payload!r}")
-            return resp.payload
 
         return self.send_request(
             Command.LOAD_CODE,
             LoadCodeRequest(code, filename),
             response_type=list[OutputItem],
-        ).map(parse)
+        ).map(lambda r: r.raise_for_status("Failed to load code").payload)
 
     def reload(self, chdir: bool = True) -> UnifiedFuture[list[OutputItem]]:
         """Request the remote server to reload its current script file."""
 
-        def parse(resp: ResponseEnvelope[list[OutputItem]]) -> list[OutputItem]:
-            if not resp.is_ok:
-                raise RuntimeError(f"Failed to reload script: {resp.payload!r}")
-            return resp.payload
-
-        return self.send_request(Command.RELOAD, ReloadRequest(chdir=chdir), response_type=list[OutputItem]).map(parse)
+        return self.send_request(
+            Command.RELOAD,
+            ReloadRequest(chdir=chdir),
+            response_type=list[OutputItem],
+        ).map(lambda r: r.raise_for_status("Failed to reload script").payload)
 
     def get_clip_info(self, output_index: int = 0) -> UnifiedFuture[ClipInfo]:
         """Fetch static metadata for the specified output index."""
-
-        def parse(resp: ResponseEnvelope[ClipInfo]) -> ClipInfo:
-            if not resp.is_ok:
-                raise KeyError(f"Failed to retrieve clip info for output {output_index}: {resp.payload}")
-            return resp.payload
 
         return self.send_request(
             Command.GET_CLIP_INFO,
             OutputIndexRequest(output_index),
             response_type=ClipInfo,
-        ).map(parse)
+        ).map(lambda r: r.raise_for_status(f"Failed to retrieve clip info for output {output_index}").payload)
 
     def request_frame(
         self,
@@ -268,30 +250,36 @@ class ClientTransport:
 
         Args:
             output_index: Index of the output clip on the server.
-            n: Frame number to fetch.
-            compression: Desired compression mode.
+            n: Frame index to retrieve.
+            compression: Preferred plane compression (zstd or none).
 
         Returns:
-            A UnifiedFuture resolving to (FrameHeader, list of compressed plane byte buffers).
+            UnifiedFuture resolving to (FrameHeader, list of plane byte buffers).
         """
-        payload = FrameRequest(output_index=output_index, n=n, compression=compression)
+        req_payload = FrameRequest(output_index=output_index, n=n, compression=compression)
 
-        def parse(resp: ResponseEnvelope[FrameHeader]) -> tuple[FrameHeader, list[bytes]]:
-            return resp.payload, resp.extra_frames
+        def parse_frame_response(resp: ResponseEnvelope[bytes]) -> tuple[FrameHeader, list[bytes]]:
+            header = unpack_payload(resp.payload_bytes, FrameHeader)
+            return header, resp.extra_frames
 
-        return self.send_request(Command.GET_FRAME, payload, response_type=FrameHeader).map(parse)
+        return self.send_request(Command.GET_FRAME, req_payload).map(parse_frame_response)
 
     def subscribe_stream(self, replay_history: bool = True) -> UnifiedFuture[bool]:
-        """Subscribe to log and output streaming from the server."""
+        """Subscribe to log records and stream events from the remote server."""
+        req_payload = StreamSubscribeRequest(replay_history=replay_history)
         return (
-            self.send_request(Command.SUBSCRIBE_STREAM, StreamSubscribeRequest(replay_history=replay_history))
-            .map(lambda resp: resp.is_ok)
+            self.send_request(Command.SUBSCRIBE_STREAM, req_payload)
+            .map(lambda r: r.status == StatusCode.OK)
             .catch(lambda _: False)
         )
 
     def unsubscribe_stream(self) -> UnifiedFuture[bool]:
-        """Unsubscribe from log and output streaming from the server."""
-        return self.send_request(Command.UNSUBSCRIBE_STREAM).map(lambda resp: resp.is_ok).catch(lambda _: False)
+        """Unsubscribe from log records and stream events."""
+        return (
+            self.send_request(Command.UNSUBSCRIBE_STREAM)
+            .map(lambda r: r.status == StatusCode.OK)
+            .catch(lambda _: False)
+        )
 
     def _start_worker_thread(self) -> None:
         self._ready_event.clear()
@@ -299,7 +287,7 @@ class ClientTransport:
         self._thread.start()
 
         if not self._ready_event.wait(timeout=5.0):
-            raise TimeoutError("Timed out waiting for transport worker thread to initialize")
+            raise RemoteTimeoutError("Timed out waiting for transport worker thread to initialize")
 
     def _worker(self) -> None:
         try:
@@ -414,9 +402,9 @@ class ClientTransport:
 
     def _send_message(self, req_id: int, cmd: Command, payload_bytes: bytes) -> None:
         if not self._started:
-            raise RuntimeError("Transport is not started")
+            raise TransportNotStartedError("Transport is not started")
         if not self._running or self._loop is None or self._send_queue is None:
-            raise RuntimeError("Transport is not connected")
+            raise TransportNotConnectedError("Transport is not connected")
 
         parts = [req_id.to_bytes(4, byteorder="big"), bytes([cmd.value]), payload_bytes]
         if self.auth_token:
@@ -425,4 +413,4 @@ class ClientTransport:
         try:
             self._loop.call_soon_threadsafe(self._send_queue.put_nowait, parts)
         except RuntimeError:
-            raise RuntimeError("ClientTransport is closed")
+            raise TransportClosedError("ClientTransport is closed")

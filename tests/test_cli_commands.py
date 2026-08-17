@@ -14,6 +14,7 @@ from vsengine.policy import ManagedEnvironment, Policy
 
 from vsremote.cli import ClientConfig, _get_y4m_header, app, info, keygen, ping, pipe, serve
 from vsremote.client import ClientTransport
+from vsremote.exceptions import RemoteExecutionError, UnsupportedFormatError
 from vsremote.protocol import ClipInfo, FrameHeader, PlaneInfo, StatusCode
 
 if TYPE_CHECKING:
@@ -151,7 +152,7 @@ def test_pipe_command_frame_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ClientTransport, "get_clip_info", lambda self, output: mock_info_fut)
     monkeypatch.setattr(ClientTransport, "request_frame", lambda self, output, n, compression="zstd": mock_frame_fut)
 
-    with pytest.raises(RuntimeError, match="Failed to fetch frame 0: Simulated frame rendering error"):
+    with pytest.raises(RemoteExecutionError, match="Failed to fetch frame 0: Simulated frame rendering error"):
         pipe(cfg, output=0)
 
 
@@ -240,7 +241,7 @@ def test_get_y4m_header_error_cases() -> None:
         subsampling_h=1,
         planes=[],
     )
-    with pytest.raises(ValueError, match="Unsupported number of planes for Y4M: 2"):
+    with pytest.raises(UnsupportedFormatError, match="Unsupported number of planes for Y4M: 2"):
         _get_y4m_header(info_2planes, None)
 
     # Unsupported subsampling for 3 planes
@@ -258,7 +259,7 @@ def test_get_y4m_header_error_cases() -> None:
         subsampling_h=3,
         planes=[],
     )
-    with pytest.raises(ValueError, match=r"Unsupported subsampling for Y4M: \(3, 3\)"):
+    with pytest.raises(UnsupportedFormatError, match=r"Unsupported subsampling for Y4M: \(3, 3\)"):
         _get_y4m_header(info_bad_sub, None)
 
 

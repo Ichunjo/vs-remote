@@ -8,6 +8,7 @@ import msgspec
 import vapoursynth as vs
 from typing_extensions import TypeForm
 
+from ..exceptions import MalformedMessageError, UnknownCommandError, UnknownStatusCodeError, UnsupportedFormatError
 from .codec import unpack_payload
 from .constants import Command, Compression, StatusCode
 
@@ -24,10 +25,12 @@ class ResponseEnvelope[T](msgspec.Struct, frozen=True):
     payload_bytes: bytes = b""
     extra_frames: list[bytes] = msgspec.field(default_factory=list)
 
-    @property
-    def is_ok(self) -> bool:
-        """Check if the server responded with OK status."""
-        return self.status == StatusCode.OK
+    def raise_for_status(self, context_msg: str | None = None) -> Self:
+        """Raise the corresponding RemoteError if the response status is not OK."""
+        if self.status != StatusCode.OK:
+            msg = f"{context_msg}: {self.payload}" if context_msg else str(self.payload)
+            self.status.raise_for_status(msg, payload=self.payload)
+        return self
 
     @overload
     @classmethod
@@ -43,12 +46,14 @@ class ResponseEnvelope[T](msgspec.Struct, frozen=True):
             case [status_byte]:
                 payload_bytes, extra = b"", []
             case _:
-                raise ValueError(f"Malformed multipart response: expected at least 1 part, got {len(frames)}")
+                raise MalformedMessageError(
+                    f"Malformed multipart response: expected at least 1 part, got {len(frames)}"
+                )
 
         try:
             status = StatusCode(int.from_bytes(status_byte, byteorder="big"))
         except ValueError as err:
-            raise ValueError(f"Unknown status code byte: {status_byte!r}") from err
+            raise UnknownStatusCodeError(f"Unknown status code byte: {status_byte!r}") from err
 
         if target_type is None or target_type is bytes:
             payload: Any = payload_bytes
@@ -82,12 +87,14 @@ class RequestEnvelope(msgspec.Struct, frozen=True):
             case [identity, req_id_bytes, cmd_byte]:
                 payload_bytes, extra = b"", []
             case _:
-                raise ValueError(f"Malformed multipart request: expected at least 3 parts, got {len(frames)}")
+                raise MalformedMessageError(
+                    f"Malformed multipart request: expected at least 3 parts, got {len(frames)}"
+                )
 
         try:
             cmd = Command(int.from_bytes(cmd_byte, byteorder="big"))
         except ValueError as err:
-            raise ValueError(f"Unknown command byte: {cmd_byte!r}") from err
+            raise UnknownCommandError(f"Unknown command byte: {cmd_byte!r}") from err
 
         req_id = int.from_bytes(req_id_bytes, byteorder="big")
 
@@ -120,7 +127,7 @@ class PlaneInfo(msgspec.Struct, frozen=True):
     @classmethod
     def from_clip(cls, clip: vs.VideoNode) -> list[Self]:
         if not clip.format.id:
-            raise ValueError("Variable format clips are not supported by vs-remote")
+            raise UnsupportedFormatError("Variable format clips are not supported by vs-remote")
 
         fmt = clip.format
         bps = fmt.bytes_per_sample
@@ -158,7 +165,7 @@ class ClipInfo(msgspec.Struct, frozen=True):
     @classmethod
     def from_clip(cls, clip: vs.VideoNode, name: str = "") -> Self:
         if not clip.format:
-            raise ValueError("Variable format clips are not supported by vs-remote")
+            raise UnsupportedFormatError("Variable format clips are not supported by vs-remote")
 
         fmt = clip.format
 

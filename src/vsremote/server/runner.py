@@ -13,6 +13,7 @@ from vsengine.policy import ContextVarStore, ManagedEnvironment, Policy
 from vsengine.vpy import ExecutionError, Script, load_code, load_script
 
 from ..api.output import _output_metadata
+from ..exceptions import EnvironmentNotSetError, OutputNotFoundError, ScriptNotLoadedError
 from ..protocol import ClipInfo, OutputItem, StreamEvent
 from ..utils import gc_collect
 from .policy import RemotePolicy
@@ -67,7 +68,7 @@ class ScriptRunner:
         """Get the active VapourSynth environment for this runner, if any."""
         with self._rlock:
             if not self._environment:
-                raise RuntimeError("No environment has been passed to this ScriptRunner instance")
+                raise EnvironmentNotSetError("No environment has been passed to this ScriptRunner instance")
             return self._environment
 
     def load_script(
@@ -163,7 +164,7 @@ class ScriptRunner:
         """
         with self._rlock:
             if self._script_path is None:
-                raise RuntimeError("No script file is associated with this ScriptRunner instance")
+                raise ScriptNotLoadedError("No script file is associated with this ScriptRunner instance")
 
             c_dir = self._chdir if chdir is None else chdir
             return self.load_script(self._script_path, chdir=c_dir)
@@ -172,14 +173,14 @@ class ScriptRunner:
         """Retrieve the VideoNode at the given output index."""
         with self._rlock:
             if index not in self._clips:
-                raise KeyError(f"Output index {index} not found. Available: {list(self._clips.keys())}")
+                raise OutputNotFoundError(f"Output index {index} not found. Available: {list(self._clips.keys())}")
             return self._clips[index]
 
     def get_clip_info(self, index: int) -> ClipInfo:
         """Retrieve static metadata for the VideoNode at index."""
         with self._rlock:
             if index not in self._clip_infos:
-                raise KeyError(f"Output index {index} not found. Available: {list(self._clip_infos.keys())}")
+                raise OutputNotFoundError(f"Output index {index} not found. Available: {list(self._clip_infos.keys())}")
             return self._clip_infos[index]
 
     def list_outputs(self) -> list[OutputItem]:
@@ -279,7 +280,7 @@ class ScriptRunner:
 
     def _extract_outputs(self) -> list[OutputItem]:
         if not self._script:
-            raise RuntimeError("Script doesn't exist")
+            raise ScriptNotLoadedError("Script doesn't exist")
 
         with self._script.environment.use():
             outputs = vs.get_outputs()

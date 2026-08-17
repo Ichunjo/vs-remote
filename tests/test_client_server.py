@@ -18,6 +18,15 @@ import zmq.asyncio
 from vsengine.policy import ManagedEnvironment, Policy
 
 from vsremote.client import ClientTransport, RemoteClient, source
+from vsremote.exceptions import (
+    EnvironmentNotSetError,
+    OutputNotFoundError,
+    RemoteAuthenticationError,
+    RemotePermissionError,
+    ScriptNotLoadedError,
+    TransportClosedError,
+    TransportNotStartedError,
+)
 from vsremote.protocol import Command, RemoteLogRecord, StatusCode, StreamEvent, StreamOutputEvent, pack_payload
 from vsremote.server import LogForwarder, RemotePolicy, ScriptRunner, ServerDaemon
 from vsremote.utils import setup_logging
@@ -673,11 +682,11 @@ async def test_permission_denied_when_allow_eval_disabled(server: ServerFactory,
         assert len(outputs) == 1
 
         # Dynamic code loading must fail with permission denied error
-        with pytest.raises(RuntimeError, match="Dynamic code evaluation is disabled on this server"):
+        with pytest.raises(RemotePermissionError, match="Dynamic code evaluation is disabled on this server"):
             await client.load_code("core.std.BlankClip().set_output(0)")
 
         # Dynamic script switching must fail with permission denied error
-        with pytest.raises(RuntimeError, match="Dynamic script loading is disabled on this server"):
+        with pytest.raises(RemotePermissionError, match="Dynamic script loading is disabled on this server"):
             await client.load_script(script)
 
 
@@ -690,13 +699,13 @@ async def test_auth_token_security(server: ServerFactory, test_clip: vs.VideoNod
         # Connecting without token -> should fail operations with unauthorized / ConnectionReset
         async with RemoteClient(f"tcp://{host}:{port}", auth_token=None) as client_unauthed:
             assert (await client_unauthed.ping()) is False
-            with pytest.raises(RuntimeError, match="Failed to list outputs"):
+            with pytest.raises(RemoteAuthenticationError, match="Failed to list outputs"):
                 await client_unauthed.list_outputs()
 
         # Connecting with wrong token -> should fail
         async with RemoteClient(f"tcp://{host}:{port}", auth_token="wrong_token_abc") as client_wrong:
             assert (await client_wrong.ping()) is False
-            with pytest.raises(RuntimeError, match="Failed to list outputs"):
+            with pytest.raises(RemoteAuthenticationError, match="Failed to list outputs"):
                 await client_wrong.list_outputs()
 
         # Connecting with valid token -> should succeed
@@ -836,14 +845,14 @@ def test_client_seeking_future_pruning(server: ServerFactory) -> None:
 def test_transport_error_states() -> None:
     trans = ClientTransport("tcp://127.0.0.1:5555")
     # _send_message when not started
-    with pytest.raises(RuntimeError, match="Transport is not started"):
+    with pytest.raises(TransportNotStartedError, match="Transport is not started"):
         trans._send_message(1, Command.PING, b"")
 
     # send_request when started but running is False
     trans._started = True
     trans._running = False
     fut = trans.send_request(Command.PING)
-    with pytest.raises(RuntimeError, match="ClientTransport is closed"):
+    with pytest.raises(TransportClosedError, match="ClientTransport is closed"):
         fut.result()
 
 
@@ -999,7 +1008,7 @@ async def test_server_daemon_invalid_commands_and_payloads(server: ServerFactory
 
 def test_server_daemon_send_multipart_closed() -> None:
     daemon = ServerDaemon(ScriptRunner())
-    with pytest.raises(RuntimeError):
+    with pytest.raises(TransportClosedError):
         asyncio.run(daemon._send_multipart([b"test"]))
 
 
@@ -1054,25 +1063,25 @@ def test_script_runner_properties_and_errors() -> None:
     # script_path is None
     assert runner.script_path is None
 
-    # reload() without script raises RuntimeError
-    with pytest.raises(RuntimeError, match="No script file is associated"):
+    # reload() without script raises ScriptNotLoadedError
+    with pytest.raises(ScriptNotLoadedError, match="No script file is associated"):
         runner.reload()
 
-    # get_clip(999) raises KeyError
-    with pytest.raises(KeyError, match="Output index 999 not found"):
+    # get_clip(999) raises OutputNotFoundError
+    with pytest.raises(OutputNotFoundError, match="Output index 999 not found"):
         runner.get_clip(999)
 
-    # get_clip_info(999) raises KeyError
-    with pytest.raises(KeyError, match="Output index 999 not found"):
+    # get_clip_info(999) raises OutputNotFoundError
+    with pytest.raises(OutputNotFoundError, match="Output index 999 not found"):
         runner.get_clip_info(999)
 
-    # _extract_outputs() raises RuntimeError when _script is None
-    with pytest.raises(RuntimeError, match="Script doesn't exist"):
+    # _extract_outputs() raises ScriptNotLoadedError when _script is None
+    with pytest.raises(ScriptNotLoadedError, match="Script doesn't exist"):
         runner._extract_outputs()
 
-    # environment raises RuntimeError when environment is None
+    # environment raises EnvironmentNotSetError when environment is None
     runner._environment = None
-    with pytest.raises(RuntimeError, match="No environment has been passed"):
+    with pytest.raises(EnvironmentNotSetError, match="No environment has been passed"):
         _ = runner.environment
 
 

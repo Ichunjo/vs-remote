@@ -20,6 +20,7 @@ from rich.table import Table
 from vsengine import ManagedEnvironment, Policy, UnifiedFuture
 
 from .client.transport import ClientTransport
+from .exceptions import UnsupportedFormatError
 from .protocol import DEFAULT_ADDRESS, ClipInfo, Compression, FrameHeader, StatusCode, decompress_plane
 from .server import ScriptRunner, ServerDaemon
 from .utils import console, setup_logging
@@ -249,7 +250,7 @@ def pipe(
             header, plane_parts = fut.result(timeout=30.0)
 
             if header.status != StatusCode.OK:
-                raise RuntimeError(f"Failed to fetch frame {n}: {header.error_message}")
+                header.status.raise_for_status(f"Failed to fetch frame {n}: {header.error_message}")
 
             if y4m:
                 stdout_buf.write(b"FRAME\n")
@@ -325,9 +326,11 @@ def _get_y4m_header(info: ClipInfo, environment: Policy | ManagedEnvironment | N
             case 0, 1:
                 y4mformat = "440"
             case _:
-                raise ValueError(f"Unsupported subsampling for Y4M: ({info.subsampling_w}, {info.subsampling_h})")
+                raise UnsupportedFormatError(
+                    f"Unsupported subsampling for Y4M: ({info.subsampling_w}, {info.subsampling_h})"
+                )
     else:
-        raise ValueError(f"Unsupported number of planes for Y4M: {info.num_planes}")
+        raise UnsupportedFormatError(f"Unsupported number of planes for Y4M: {info.num_planes}")
 
     if isinstance(policy := environment, Policy):
         ctx = policy.new_environment().use()

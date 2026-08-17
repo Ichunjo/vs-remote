@@ -1,8 +1,64 @@
 from __future__ import annotations
 
-from . import client, protocol, server
+from . import client, exceptions, protocol, server
 from .api import is_preview, set_output
 from .cli import info, keygen, ping, pipe, serve
 from .client import RemoteClient, source
+from .exceptions import (
+    EnvironmentNotSetError,
+    MalformedMessageError,
+    OutputNotFoundError,
+    ProtocolError,
+    RemoteAuthenticationError,
+    RemoteCommandError,
+    RemoteError,
+    RemoteExecutionError,
+    RemoteNotFoundError,
+    RemotePayloadError,
+    RemotePermissionError,
+    RemoteTimeoutError,
+    ScriptNotLoadedError,
+    ScriptRunnerError,
+    TransportClosedError,
+    TransportError,
+    TransportNotConnectedError,
+    TransportNotStartedError,
+    UnknownCommandError,
+    UnknownStatusCodeError,
+    UnsupportedFormatError,
+    VSRemoteError,
+)
 
-__all__ = ["RemoteClient", "client", "is_preview", "protocol", "serve", "server", "set_output", "source"]
+__all__ = [
+    "EnvironmentNotSetError",
+    "MalformedMessageError",
+    "OutputNotFoundError",
+    "ProtocolError",
+    "RemoteAuthenticationError",
+    "RemoteClient",
+    "RemoteCommandError",
+    "RemoteError",
+    "RemoteExecutionError",
+    "RemoteNotFoundError",
+    "RemotePayloadError",
+    "RemotePermissionError",
+    "RemoteTimeoutError",
+    "ScriptNotLoadedError",
+    "ScriptRunnerError",
+    "TransportClosedError",
+    "TransportError",
+    "TransportNotConnectedError",
+    "TransportNotStartedError",
+    "UnknownCommandError",
+    "UnknownStatusCodeError",
+    "UnsupportedFormatError",
+    "VSRemoteError",
+    "client",
+    "exceptions",
+    "is_preview",
+    "protocol",
+    "serve",
+    "server",
+    "set_output",
+    "source",
+]

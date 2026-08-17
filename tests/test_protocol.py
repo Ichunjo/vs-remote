@@ -6,6 +6,12 @@ import msgspec
 import pytest
 import vapoursynth as vs
 
+from vsremote.exceptions import (
+    MalformedMessageError,
+    UnknownCommandError,
+    UnknownStatusCodeError,
+    UnsupportedFormatError,
+)
 from vsremote.protocol import (
     ClipInfo,
     Command,
@@ -34,7 +40,7 @@ def test_plane_info_serialization() -> None:
 
 @pytest.mark.vpy("initial-core")
 def test_plane_info_from_clip() -> None:
-    with pytest.raises(ValueError, match="Variable format clips are not supported by vs-remote"):
+    with pytest.raises(UnsupportedFormatError, match="Variable format clips are not supported by vs-remote"):
         PlaneInfo.from_clip(vs.core.std.BlankClip(varformat=True))
 
 
@@ -61,7 +67,7 @@ def test_clip_info_no_format_error() -> None:
     class FakeClipNoFormat:
         format = None
 
-    with pytest.raises(ValueError, match="Variable format clips are not supported by vs-remote"):
+    with pytest.raises(UnsupportedFormatError, match="Variable format clips are not supported by vs-remote"):
         ClipInfo.from_clip(FakeClipNoFormat())  # type: ignore[arg-type]
 
 
@@ -157,11 +163,11 @@ def test_request_envelope_from_frames() -> None:
     assert req_invalid_utf8.auth_token is None
 
     # Malformed: less than 3 frames
-    with pytest.raises(ValueError, match="Malformed multipart request"):
+    with pytest.raises(MalformedMessageError, match="Malformed multipart request"):
         RequestEnvelope.from_frames([b"id", b"req_id"])
 
     # Invalid command byte
-    with pytest.raises(ValueError, match="Unknown command byte"):
+    with pytest.raises(UnknownCommandError, match="Unknown command byte"):
         RequestEnvelope.from_frames([b"id", (1).to_bytes(4, "big"), bytes([255])])
 
 
@@ -169,29 +175,26 @@ def test_response_envelope_from_frames() -> None:
     # 2-frame response
     frames_2 = [bytes([StatusCode.OK]), pack_payload({"status": "healthy"})]
     resp_2 = ResponseEnvelope.from_frames(frames_2)
-    assert resp_2.is_ok is True
     assert resp_2.status == StatusCode.OK
     assert resp_2.payload == pack_payload({"status": "healthy"})
 
     # Single frame response (status byte only)
     frames_single = [bytes([StatusCode.OK])]
     resp_single = ResponseEnvelope.from_frames(frames_single)
-    assert resp_single.is_ok is True
     assert resp_single.payload_bytes == b""
     assert resp_single.extra_frames == []
 
-    # Empty frames raises ValueError
-    with pytest.raises(ValueError, match="Malformed multipart response"):
+    # Empty frames raises MalformedMessageError
+    with pytest.raises(MalformedMessageError, match="Malformed multipart response"):
         ResponseEnvelope.from_frames([])
 
     # Invalid status code byte
-    with pytest.raises(ValueError, match="Unknown status code byte"):
+    with pytest.raises(UnknownStatusCodeError, match="Unknown status code byte"):
         ResponseEnvelope.from_frames([bytes([250])])
 
     # Error status with typed target falling back to untyped payload decoding
     err_frames = [bytes([StatusCode.ERROR]), pack_payload({"error": "Failed to load script"})]
     err_resp = ResponseEnvelope.from_frames(err_frames, ClipInfo)
-    assert err_resp.is_ok is False
     assert err_resp.status == StatusCode.ERROR
     assert cast(dict[str, Any], err_resp.payload) == {"error": "Failed to load script"}
 

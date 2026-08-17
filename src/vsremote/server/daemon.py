@@ -13,6 +13,7 @@ from typing import Any
 import vapoursynth as vs
 import zmq.asyncio
 
+from ..exceptions import TransportClosedError
 from ..protocol import (
     DEFAULT_ADDRESS,
     Command,
@@ -465,7 +466,7 @@ class ServerDaemon:
 
     async def _send_multipart(self, parts: Sequence[bytes | memoryview]) -> None:
         if not self._socket or not self._send_lock:
-            raise RuntimeError
+            raise TransportClosedError("Server socket or send lock is not initialized")
 
         async with self._send_lock:
             await self._socket.send_multipart(parts)
