@@ -130,6 +130,7 @@ with vsremote.RemoteClient("tcp://192.168.1.100:5555") as client:
     clip0 = client.get_output(0)
     all_clips = client.get_outputs()  # dict[int, vs.VideoNode]
 
+
 async def main() -> None:
     # Also usable as asynchronous context manager
     async with vsremote.RemoteClient("tcp://192.168.1.100:5555") as client:
@@ -138,8 +139,8 @@ async def main() -> None:
         await client.load_script("/path/to/another.vpy")  # Switch active script
         await client.load_code("import vapoursynth as vs; vs.core.std.BlankClip().set_output()")
 
-asyncio.run(main())
 
+asyncio.run(main())
 ```
 
 ---
