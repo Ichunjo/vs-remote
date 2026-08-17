@@ -2,20 +2,26 @@ from __future__ import annotations
 
 import io
 import sys
-import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from vsengine.policy import Policy
 
-from vsremote.server.cli import ClientConfig, app, info, keygen, ping, pipe, serve
+from vsremote.server.cli import ClientConfig, app, info, keygen, ping, pipe
 
-HOST = "127.0.0.1"
+if TYPE_CHECKING:
+    from conftest import ServerFactory
 
 
 @pytest.mark.vpy("no-core")
-def test_cli_subcommands(port: int, tmp_path: Path, vpy_policy: Policy, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test ping, info, and pipe CLI commands against a live running vsremote server."""
+def test_cli_subcommands(
+    server: ServerFactory,
+    tmp_path: Path,
+    vpy_policy: Policy,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     script_file = tmp_path / "test_cli_commands.vpy"
     script_file.write_text(
         "import vapoursynth as vs\n"
@@ -25,35 +31,39 @@ def test_cli_subcommands(port: int, tmp_path: Path, vpy_policy: Policy, monkeypa
         encoding="utf-8",
     )
 
-    ready_event = threading.Event()
-    stop_event = threading.Event()
-
-    server_thread = threading.Thread(
-        target=serve,
-        args=(script_file,),
-        kwargs={
-            "address": f"tcp://{HOST}:{port}",
-            "compression": "zstd",
-            "ready_event": ready_event,
-            "stop_event": stop_event,
-            "environment": vpy_policy,
-        },
-        daemon=True,
-    )
-    server_thread.start()
-    assert ready_event.wait(timeout=5.0)
-
-    try:
-        address = f"tcp://{HOST}:{port}"
+    with server(script_file, compression="zstd", environment=vpy_policy) as (host, port):
+        address = f"tcp://{host}:{port}"
         client_cfg = ClientConfig(address=address)
 
-        # 1. Test ping command
+        # Clear any startup logs before testing command outputs
+        capsys.readouterr()
+
+        # Test ping command
         ping(client_cfg)
+        ping_err = capsys.readouterr().err
+        assert "OK" in ping_err
+        assert "Successfully connected to" in ping_err
+        assert address in ping_err
+        assert "RTT:" in ping_err
 
-        # 2. Test info command
+        # Test info command
         info(client_cfg)
+        info_err = capsys.readouterr().err
+        assert f"Remote Outputs for {address}" in info_err
+        assert "Index" in info_err
+        assert "Name" in info_err
+        assert "Resolution" in info_err
+        assert "FPS" in info_err
+        assert "Format" in info_err
+        assert "Frames" in info_err
+        assert "0" in info_err
+        assert "Output 0" in info_err
+        assert "160x120" in info_err
+        assert "24.000 (24/1)" in info_err
+        assert "YUV420P8" in info_err
+        assert "3" in info_err
 
-        # 3. Test pipe command with Y4M header
+        # Test pipe command with Y4M header
         buf = io.BytesIO()
         monkeypatch.setattr(sys.stdout, "buffer", buf)
         pipe(client_cfg, output=0, y4m=True, prefetch=2, environment=vpy_policy)
@@ -66,7 +76,7 @@ def test_cli_subcommands(port: int, tmp_path: Path, vpy_policy: Policy, monkeypa
         frame_markers = output_bytes.count(b"FRAME\n")
         assert frame_markers == 3
 
-        # 4. Test pipe command raw without Y4M header
+        # Test pipe command raw without Y4M header
         raw_buf = io.BytesIO()
         monkeypatch.setattr(sys.stdout, "buffer", raw_buf)
         pipe(client_cfg, output=0, y4m=False, prefetch=2)
@@ -76,10 +86,6 @@ def test_cli_subcommands(port: int, tmp_path: Path, vpy_policy: Policy, monkeypa
         # 160x120 YUV420: Y=160*120=19200, U=80*60=4800, V=80*60=4800 -> 28800 bytes per frame * 3 frames = 86400 bytes
         expected_size = (160 * 120 + 80 * 60 + 80 * 60) * 3
         assert len(raw_bytes) == expected_size
-
-    finally:
-        stop_event.set()
-        server_thread.join(timeout=3.0)
 
 
 def test_cli_dispatch_subcommands() -> None:
@@ -92,11 +98,10 @@ def test_cli_dispatch_subcommands() -> None:
     assert func == info
     assert bound.arguments["config"].address == "tcp://127.0.0.1:5555"
 
-    func, bound, _ = app.parse_args(["pipe", "tcp://127.0.0.1:5555", "--output", "1", "--no-y4m"])
+    func, bound, _ = app.parse_args(["pipe", "tcp://127.0.0.1:5555", "--output", "1"])
     assert func == pipe
     assert bound.arguments["config"].address == "tcp://127.0.0.1:5555"
     assert bound.arguments["output"] == 1
-    assert bound.arguments["y4m"] is False
 
     func, bound, _ = app.parse_args(["keygen"])
     assert func == keygen

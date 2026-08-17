@@ -61,6 +61,8 @@ testpaths = ["tests"]
 
 [tool.coverage.run]
 disable_warnings = ["couldnt-parse"]
+source = ["src"]
+omit = ["tests/**", "./*.py"]
 
 [tool.ruff]
 line-length = 120

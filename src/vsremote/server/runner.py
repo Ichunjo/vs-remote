@@ -24,9 +24,9 @@ logger = getLogger(__name__)
 class ScriptRunner:
     """Manages VapourSynth script execution, dynamic reload, and output caching."""
 
-    def __init__(self) -> None:
+    def __init__(self, environment: Policy | ManagedEnvironment | vs.Environment | None = None) -> None:
         self._rlock = threading.RLock()
-        self._script: Script[ManagedEnvironment] | None = None
+        self._script: Script[ManagedEnvironment] | Script[vs.Environment] | None = None
         self._environment: vs.Environment | ManagedEnvironment | None = None
         self._policy: Policy | None = None
         self._registered_policy = False
@@ -36,6 +36,8 @@ class ScriptRunner:
         self._clip_infos = dict[int, ClipInfo]()
         self._output_items = list[OutputItem]()
         self._startup_events = deque[StreamEvent](maxlen=1000)
+
+        self._ensure_policy(environment)
 
     def __enter__(self) -> Self:
         return self
@@ -204,7 +206,7 @@ class ScriptRunner:
             environment: Optional Policy or ManagedEnvironment.
             chdir: Whether to change directory to the script's parent while loading.
         """
-        self = cls()
+        self = cls(environment=environment)
         self.load_script(script_path, environment=environment, chdir=chdir)
         return self
 
@@ -216,7 +218,7 @@ class ScriptRunner:
         environment: vs.Environment | ManagedEnvironment | None = None,
     ) -> ScriptRunner:
         """Create a runner from existing VideoNodes (useful for tests/embedded usage)."""
-        self = cls()
+        self = cls(environment=environment)
         with self._rlock:
             self._environment = environment
             if self._environment is None and vs.has_policy():
@@ -233,7 +235,9 @@ class ScriptRunner:
 
         return self
 
-    def _ensure_policy(self, environment: Policy | ManagedEnvironment | None = None) -> Policy | ManagedEnvironment:
+    def _ensure_policy(
+        self, environment: Policy | ManagedEnvironment | vs.Environment | None = None
+    ) -> Policy | ManagedEnvironment | vs.Environment | None:
         if environment is not None:
             if isinstance(environment, Policy):
                 self._policy = environment
@@ -248,7 +252,7 @@ class ScriptRunner:
             self._registered_policy = True
             return self._policy
 
-        raise RuntimeError("A Policy already exists in VapourSynth")
+        return None
 
     def _teardown_environment(self) -> None:
         self._clips.clear()
@@ -269,7 +273,10 @@ class ScriptRunner:
         if not self._script:
             raise RuntimeError("Script doesn't exist")
 
-        for idx, output in self._script.environment.outputs.items():
+        with self._script.environment.use():
+            outputs = vs.get_outputs()
+
+        for idx, output in outputs.items():
             if isinstance(output, vs.VideoOutputTuple):
                 clip = output.clip
                 name = _output_metadata.get(idx) or f"Output {idx}"

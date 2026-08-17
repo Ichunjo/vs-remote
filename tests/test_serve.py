@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import threading
 from collections.abc import Awaitable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import vapoursynth as vs
@@ -14,13 +13,16 @@ from vsengine.policy import Policy
 from vsremote.client import RemoteClient, source
 from vsremote.server.cli import app, keygen, serve
 
+if TYPE_CHECKING:
+    from conftest import ServerFactory
+
 core = vs.core
 
 HOST = "127.0.0.1"
 
 
 @pytest.mark.vpy("initial-core")
-def test_serve_lifecycle(port: int, tmp_path: Path, vpy_policy: Policy) -> None:
+def test_serve_lifecycle(server: ServerFactory, tmp_path: Path, vpy_policy: Policy) -> None:
     """Test full serve lifecycle with multi-output VapourSynth script, frame fetching, and clean shutdown."""
     script_file = tmp_path / "test_serve.vpy"
     script_file.write_text(
@@ -33,27 +35,8 @@ def test_serve_lifecycle(port: int, tmp_path: Path, vpy_policy: Policy) -> None:
         encoding="utf-8",
     )
 
-    ready_event = threading.Event()
-    stop_event = threading.Event()
-
-    server_thread = threading.Thread(
-        target=serve,
-        args=(script_file,),
-        kwargs={
-            "address": f"tcp://{HOST}:{port}",
-            "compression": "zstd",
-            "ready_event": ready_event,
-            "stop_event": stop_event,
-            "environment": vpy_policy,
-        },
-        name="ServeLifecycleThread",
-        daemon=True,
-    )
-    server_thread.start()
-    assert ready_event.wait(timeout=5.0), "serve() failed to signal ready"
-
-    try:
-        address = f"tcp://{HOST}:{port}"
+    with server(script_file, compression="zstd", environment=vpy_policy) as (host, port):
+        address = f"tcp://{host}:{port}"
         with RemoteClient(address) as client:
             assert client.ping().result() is True
 
@@ -81,10 +64,6 @@ def test_serve_lifecycle(port: int, tmp_path: Path, vpy_policy: Policy) -> None:
         assert proxy1.format.id == vs.RGB24
         frame1 = proxy1.get_frame(0)
         assert frame1.width == 80
-    finally:
-        stop_event.set()
-        server_thread.join(timeout=3.0)
-        assert not server_thread.is_alive(), "serve thread did not terminate cleanly"
 
 
 def test_serve_file_not_found() -> None:

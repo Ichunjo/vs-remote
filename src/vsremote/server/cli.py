@@ -11,12 +11,12 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Annotated, override
 
+import vapoursynth as vs
 import zmq
 from cyclopts import App, Parameter
 from cyclopts.help import DefaultFormatter, HelpPanel
 from rich.console import Console, ConsoleOptions
 from rich.table import Table
-from vapoursynth import core
 from vsengine import ManagedEnvironment, Policy, UnifiedFuture
 
 from ..client.transport import ClientTransport
@@ -117,7 +117,11 @@ def serve(
         curve_secret_key = sec.decode("ascii")
         logger.info("CurveZMQ encryption enabled. Client public key: %s", curve_public_key)
 
-    runner = ScriptRunner.from_script(script_path, environment=environment) if script_path else ScriptRunner()
+    runner = (
+        ScriptRunner.from_script(script_path, environment=environment)
+        if script_path
+        else ScriptRunner(environment=environment)
+    )
 
     with runner:
         daemon = ServerDaemon(
@@ -336,7 +340,7 @@ def _get_y4m_header(info: ClipInfo, environment: Policy | ManagedEnvironment | N
         ctx = nullcontext()
 
     with ctx:
-        bits = core.get_video_format(info.format_id).bits_per_sample
+        bits = vs.core.get_video_format(info.format_id).bits_per_sample
 
     if bits > 8:
         y4mformat += f"p{bits}"

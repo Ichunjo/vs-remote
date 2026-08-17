@@ -119,7 +119,7 @@ class PlaneInfo(msgspec.Struct, frozen=True):
 
     @classmethod
     def from_clip(cls, clip: vs.VideoNode) -> list[Self]:
-        if not clip.format:
+        if not clip.format.id:
             raise ValueError("Variable format clips are not supported by vs-remote")
 
         fmt = clip.format

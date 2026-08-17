@@ -3,11 +3,10 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
-import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import override
+from typing import TYPE_CHECKING, override
 
 import pytest
 import vapoursynth as vs
@@ -17,9 +16,13 @@ from vsengine.policy import ManagedEnvironment, Policy
 
 from vsremote.client import ClientTransport, RemoteClient, source
 from vsremote.protocol.constants import Command, StatusCode
-from vsremote.server import RemotePolicy, ScriptRunner, ServerDaemon
+from vsremote.server import RemotePolicy, ScriptRunner
+
+if TYPE_CHECKING:
+    from conftest import ServerFactory
 
 HOST = "127.0.0.1"
+core = vs.core
 
 
 class LogCollector(logging.Handler):
@@ -61,20 +64,20 @@ def test_list_outputs(running_server: tuple[str, int]) -> None:
 async def test_async_client_operations(running_server: tuple[str, int]) -> None:
     host, port = running_server
     async with RemoteClient(f"tcp://{host}:{port}") as client:
-        # 1. Async ping
+        # Async ping
         assert (await client.ping()) is True
 
-        # 2. Async list outputs
+        # Async list outputs
         outputs = await client.list_outputs()
         assert len(outputs) == 2
         assert outputs[0].index == 0
 
-        # 3. Async get clip info
+        # Async get clip info
         info = await client.get_clip_info(0)
         assert info.width == 128
         assert info.num_frames == 20
 
-        # 4. Async request frame
+        # Async request frame
         header, planes = await client.request_frame(0, 5)
         assert header.status == StatusCode.OK
         assert header.n == 5
@@ -82,10 +85,7 @@ async def test_async_client_operations(running_server: tuple[str, int]) -> None:
 
 
 @pytest.mark.vpy("initial-core")
-def test_remote_source_frame_rendering(
-    running_server: tuple[str, int],
-    test_clip: vs.VideoNode,
-) -> None:
+def test_remote_source_frame_rendering(running_server: tuple[str, int], test_clip: vs.VideoNode) -> None:
     host, port = running_server
     address = f"tcp://{host}:{port}"
 
@@ -98,7 +98,9 @@ def test_remote_source_frame_rendering(
     assert remote_clip.format.id == test_clip.format.id
 
     # Test individual frames and verify bit-for-bit pixel matching and props
-    for frame_num in [0, 5, 10, 19]:
+    for frame_num, (remote_frame, local_frame) in enumerate(
+        zip(remote_clip.frames(close=True), test_clip.frames(close=True))
+    ):
         remote_frame = remote_clip.get_frame(frame_num)
         local_frame = test_clip.get_frame(frame_num)
 
@@ -115,7 +117,7 @@ def test_remote_source_frame_rendering(
 
 
 @pytest.mark.vpy("initial-core")
-def test_remote_source_10bit(running_server: tuple[str, int], test_clip_10bit: vs.VideoNode) -> None:
+def test_remote_source_10bit(running_server: tuple[str, int]) -> None:
     host, port = running_server
     address = f"tcp://{host}:{port}"
 
@@ -124,9 +126,6 @@ def test_remote_source_10bit(running_server: tuple[str, int], test_clip_10bit: v
         assert remote_clip.format.id == vs.YUV420P10
         assert remote_clip.width == 64
         assert remote_clip.num_frames == 10
-
-        frame = remote_clip.get_frame(0)
-        assert frame.format.id == vs.YUV420P10
 
 
 @pytest.mark.vpy("initial-core")
@@ -138,12 +137,12 @@ def test_concurrent_frame_requests(running_server: tuple[str, int]) -> None:
         remote_clip = client.get_output(0)
 
         # Concurrently request 20 frames across 8 worker threads
-        def _fetch(n: int) -> int:
+        def fetch(n: int) -> int:
             f = remote_clip.get_frame(n % 20)
             return f.props["TestInt"]  # type: ignore[return-value]
 
         with ThreadPoolExecutor(max_workers=8) as pool:
-            results = list(pool.map(_fetch, range(40)))
+            results = list(pool.map(fetch, range(40)))
 
         assert len(results) == 40
         for idx, res in enumerate(results):
@@ -216,7 +215,7 @@ def test_script_runner_no_policy(tmp_path: Path) -> None:
     assert not vs.has_policy()
 
 
-@pytest.mark.vpy("initial-core")
+@pytest.mark.vpy("no-core")
 def test_script_runner_with_policy(tmp_path: Path, vpy_policy: Policy) -> None:
     """Verify ScriptRunner runs correctly with an explicitly supplied Policy."""
     script_file = tmp_path / "test_policy.vpy"
@@ -267,23 +266,23 @@ def test_client_transport_lifecycle(running_server: tuple[str, int]) -> None:
 
     transport = ClientTransport(address)
 
-    # 1. Unstarted transport should reject requests
+    # Unstarted transport should reject requests
     with pytest.raises(RuntimeError, match="Transport is not started"):
         transport.send_request(Command.PING).result()
 
     with pytest.raises(RuntimeError, match="Transport is not started"):
         transport.list_outputs().result()
 
-    # 2. Start transport and verify communication
+    # Start transport and verify communication
     transport.start()
     assert transport.ping().result() is True
     assert len(transport.list_outputs().result()) == 2
 
-    # 3. Multiple start calls should be idempotent
+    # Multiple start calls should be idempotent
     transport.start()
     assert transport.ping().result() is True
 
-    # 4. Close transport and verify idempotency
+    # Close transport and verify idempotency
     transport.close()
     transport.close()
 
@@ -350,8 +349,8 @@ def test_remote_client_shared_transport_multiple_clips(running_server: tuple[str
 
 
 @pytest.mark.asyncio(loop_factories=["custom"])
-@pytest.mark.vpy("initial-core")
-async def test_stream_structured_log_records(port: int, tmp_path: Path, vpy_policy: Policy) -> None:
+@pytest.mark.vpy("no-policy")
+async def test_stream_structured_log_records(server: ServerFactory, tmp_path: Path) -> None:
     """Verify server-side Python logging is streamed as structured LogRecords to the client."""
     script_file = tmp_path / "test_logging.vpy"
     script_file.write_text(
@@ -364,35 +363,28 @@ async def test_stream_structured_log_records(port: int, tmp_path: Path, vpy_poli
         encoding="utf-8",
     )
 
-    runner = ScriptRunner.from_script(script_file, environment=vpy_policy)
-    daemon = ServerDaemon(runner, address=f"tcp://{HOST}:{port}", compression="zstd")
-    ready_event = asyncio.Event()
-    daemon_task = asyncio.create_task(daemon.start(ready_event=ready_event))
-    await ready_event.wait()
+    async with server(script_file, compression="zstd") as (host, port):
+        collector = LogCollector()
+        target_logger = logging.getLogger("test_custom_logger")
+        target_logger.addHandler(collector)
+        try:
+            async with RemoteClient(f"tcp://{host}:{port}") as client:
+                assert (await client.ping()) is True
+                await asyncio.sleep(0.1)
 
-    collector = LogCollector()
-    target_logger = logging.getLogger("test_custom_logger")
-    target_logger.addHandler(collector)
-    try:
-        async with RemoteClient(f"tcp://{HOST}:{port}") as client:
-            assert (await client.ping()) is True
-            await asyncio.sleep(0.1)
-
-        matching = [r for r in collector.records if r.name == "test_custom_logger"]
-        assert len(matching) >= 1
-        assert matching[0].levelno == logging.WARNING
-        assert matching[0].msg == "Custom warning: %s"
-        assert matching[0].args == ("arg_val",)
-        assert matching[0].getMessage() == "Custom warning: arg_val"
-    finally:
-        target_logger.removeHandler(collector)
-        await daemon.stop()
-        await daemon_task
+            matching = [r for r in collector.records if r.name == "test_custom_logger"]
+            assert len(matching) >= 1
+            assert matching[0].levelno == logging.WARNING
+            assert matching[0].msg == "Custom warning: %s"
+            assert matching[0].args == ("arg_val",)
+            assert matching[0].getMessage() == "Custom warning: arg_val"
+        finally:
+            target_logger.removeHandler(collector)
 
 
 @pytest.mark.asyncio(loop_factories=["custom"])
-@pytest.mark.vpy("initial-core")
-async def test_stream_vapoursynth_log_message(port: int, tmp_path: Path, vpy_policy: Policy) -> None:
+@pytest.mark.vpy("no-policy")
+async def test_stream_vapoursynth_log_message(server: ServerFactory, tmp_path: Path) -> None:
     """Verify VapourSynth core.log_message is intercepted and streamed to the client."""
     script_file = tmp_path / "test_vs_log.vpy"
     script_file.write_text(
@@ -405,34 +397,27 @@ async def test_stream_vapoursynth_log_message(port: int, tmp_path: Path, vpy_pol
         encoding="utf-8",
     )
 
-    runner = ScriptRunner.from_script(script_file, environment=vpy_policy)
-    daemon = ServerDaemon(runner, address=f"tcp://{HOST}:{port}", compression="zstd")
-    ready_event = asyncio.Event()
-    daemon_task = asyncio.create_task(daemon.start(ready_event=ready_event))
-    await ready_event.wait()
+    async with server(script_file, compression="zstd") as (host, port):
+        collector = LogCollector()
+        vs_logger = logging.getLogger("vapoursynth")
+        vs_logger.addHandler(collector)
+        try:
+            async with RemoteClient(f"tcp://{host}:{port}") as client:
+                assert (await client.ping()) is True
+                await asyncio.sleep(0.1)
 
-    collector = LogCollector()
-    vs_logger = logging.getLogger("vapoursynth")
-    vs_logger.addHandler(collector)
-    try:
-        async with RemoteClient(f"tcp://{HOST}:{port}") as client:
-            assert (await client.ping()) is True
-            await asyncio.sleep(0.1)
-
-        vs_records = [
-            r for r in collector.records if r.name == "vapoursynth" and "VS core warning raised" in r.getMessage()
-        ]
-        assert len(vs_records) >= 1
-        assert vs_records[0].levelno == logging.WARNING
-    finally:
-        vs_logger.removeHandler(collector)
-        await daemon.stop()
-        await daemon_task
+            vs_records = [
+                r for r in collector.records if r.name == "vapoursynth" and "VS core warning raised" in r.getMessage()
+            ]
+            assert len(vs_records) >= 1
+            assert vs_records[0].levelno == logging.WARNING
+        finally:
+            vs_logger.removeHandler(collector)
 
 
 @pytest.mark.asyncio(loop_factories=["custom"])
-@pytest.mark.vpy("initial-core")
-async def test_stream_stdout_and_stderr(port: int, tmp_path: Path, vpy_policy: Policy) -> None:
+@pytest.mark.vpy("no-policy")
+async def test_stream_stdout_and_stderr(server: ServerFactory, tmp_path: Path) -> None:
     """Verify direct print() and sys.stderr.write() from script are streamed to client buffers."""
     script_file = tmp_path / "test_streams.vpy"
     script_file.write_text(
@@ -446,33 +431,22 @@ async def test_stream_stdout_and_stderr(port: int, tmp_path: Path, vpy_policy: P
         encoding="utf-8",
     )
 
-    runner = ScriptRunner.from_script(script_file, environment=vpy_policy)
-    daemon = ServerDaemon(runner, address=f"tcp://{HOST}:{port}", compression="zstd")
-    ready_event = asyncio.Event()
-    daemon_task = asyncio.create_task(daemon.start(ready_event=ready_event))
-    await ready_event.wait()
-
     stdout_buf = io.StringIO()
     stderr_buf = io.StringIO()
-    try:
-        async with RemoteClient(
-            f"tcp://{HOST}:{port}",
-            stdout=stdout_buf,
-            stderr=stderr_buf,
-        ) as client:
-            assert (await client.ping()) is True
-            await asyncio.sleep(0.1)
+    async with (
+        server(script_file, compression="zstd") as (host, port),
+        RemoteClient(f"tcp://{host}:{port}", stdout=stdout_buf, stderr=stderr_buf) as client,
+    ):
+        assert (await client.ping()) is True
+        await asyncio.sleep(0.1)
 
         assert "Hello from remote stdout!" in stdout_buf.getvalue()
         assert "Direct stderr message" in stderr_buf.getvalue()
-    finally:
-        await daemon.stop()
-        await daemon_task
 
 
 @pytest.mark.asyncio(loop_factories=["custom"])
 @pytest.mark.vpy("no-policy")
-async def test_stream_logs_not_duplicated_in_stderr(port: int, tmp_path: Path) -> None:
+async def test_stream_logs_not_duplicated_in_stderr(server: ServerFactory, tmp_path: Path) -> None:
     """Verify logs outputted during script run are forwarded as LogRecords without duplicating to stderr."""
 
     script_file = tmp_path / "test_no_dup.vpy"
@@ -487,21 +461,15 @@ async def test_stream_logs_not_duplicated_in_stderr(port: int, tmp_path: Path) -
         encoding="utf-8",
     )
 
-    collector = LogCollector()
-    vs_logger = logging.getLogger("vapoursynth")
-    vs_logger.addHandler(collector)
+    async with server(script_file, compression="zstd") as (host, port):
+        collector = LogCollector()
+        vs_logger = logging.getLogger("vapoursynth")
+        vs_logger.addHandler(collector)
 
-    try:
-        runner = ScriptRunner.from_script(script_file)
-        daemon = ServerDaemon(runner, address=f"tcp://{HOST}:{port}", compression="zstd")
-        ready_event = asyncio.Event()
-        daemon_task = asyncio.create_task(daemon.start(ready_event=ready_event))
-        await ready_event.wait()
-
-        stdout_buf = io.StringIO()
-        stderr_buf = io.StringIO()
         try:
-            async with RemoteClient(f"tcp://{HOST}:{port}", stdout=stdout_buf, stderr=stderr_buf) as client:
+            stdout_buf = io.StringIO()
+            stderr_buf = io.StringIO()
+            async with RemoteClient(f"tcp://{host}:{port}", stdout=stdout_buf, stderr=stderr_buf) as client:
                 assert (await client.ping()) is True
                 await asyncio.sleep(0.1)
 
@@ -516,15 +484,12 @@ async def test_stream_logs_not_duplicated_in_stderr(port: int, tmp_path: Path) -
             assert "Remote script stdout message" in stdout_buf.getvalue()
             assert "VS core warning message!" not in stderr_buf.getvalue()
         finally:
-            await daemon.stop()
-            await daemon_task
-    finally:
-        vs_logger.removeHandler(collector)
+            vs_logger.removeHandler(collector)
 
 
 @pytest.mark.asyncio(loop_factories=["custom"])
-@pytest.mark.vpy("initial-core")
-async def test_forward_logs_disabled(port: int, tmp_path: Path, vpy_policy: Policy) -> None:
+@pytest.mark.vpy("no-policy")
+async def test_forward_logs_disabled(server: ServerFactory, tmp_path: Path) -> None:
     """Verify forward_logs=False suppresses forwarding records to Python logging."""
     script_file = tmp_path / "test_logging_disabled.vpy"
     script_file.write_text(
@@ -537,34 +502,25 @@ async def test_forward_logs_disabled(port: int, tmp_path: Path, vpy_policy: Poli
         encoding="utf-8",
     )
 
-    runner = ScriptRunner.from_script(script_file, environment=vpy_policy)
-    daemon = ServerDaemon(runner, address=f"tcp://{HOST}:{port}", compression="zstd")
-    ready_event = asyncio.Event()
-    daemon_task = asyncio.create_task(daemon.start(ready_event=ready_event))
-    await ready_event.wait()
+    async with server(script_file, compression="zstd") as (host, port):
+        collector = LogCollector()
+        target_logger = logging.getLogger("test_disabled_logger")
+        target_logger.addHandler(collector)
+        try:
+            async with RemoteClient(f"tcp://{host}:{port}", forward_logs=False) as client:
+                assert (await client.ping()) is True
+                await asyncio.sleep(0.1)
 
-    collector = LogCollector()
-    target_logger = logging.getLogger("test_disabled_logger")
-    target_logger.addHandler(collector)
-    try:
-        async with RemoteClient(f"tcp://{HOST}:{port}", forward_logs=False) as client:
-            assert (await client.ping()) is True
-            await asyncio.sleep(0.1)
-
-        matching = [r for r in collector.records if r.name == "test_disabled_logger"]
-        assert len(matching) == 0
-    finally:
-        target_logger.removeHandler(collector)
-        await daemon.stop()
-        await daemon_task
+            matching = [r for r in collector.records if r.name == "test_disabled_logger"]
+            assert len(matching) == 0
+        finally:
+            target_logger.removeHandler(collector)
 
 
 @pytest.mark.vpy("no-policy")
 def test_remote_policy_logger_interception(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify RemotePolicy intercepts core.log_message via api.set_logger."""
     logs = list[tuple[int, str]]()
-    policy = RemotePolicy()
-    policy.register()
 
     monkeypatch.setattr(
         logging.getLogger("vapoursynth"),
@@ -572,23 +528,17 @@ def test_remote_policy_logger_interception(monkeypatch: pytest.MonkeyPatch) -> N
         lambda lvl, msg, *args, **kwargs: logs.append((lvl, msg)),
     )
 
-    try:
-        env = policy.new_environment()
-        try:
-            with env.use():
-                env.core.log_message(vs.MESSAGE_TYPE_WARNING, "Direct core log from RemotePolicy")
-            assert len(logs) == 1
-            assert logs[0][0] == logging.WARNING
-            assert logs[0][1] == "Direct core log from RemotePolicy"
-        finally:
-            env.dispose()
-    finally:
-        policy.unregister()
+    with RemotePolicy() as policy, policy.new_environment() as env, env.use():
+        env.core.log_message(vs.MESSAGE_TYPE_WARNING, "Direct core log from RemotePolicy")
+
+    assert len(logs) == 1
+    assert logs[0][0] == logging.WARNING
+    assert logs[0][1] == "Direct core log from RemotePolicy"
 
 
 @pytest.mark.asyncio(loop_factories=["custom"])
-@pytest.mark.vpy("initial-core")
-async def test_client_reload_script(tmp_path: Path, port: int, vpy_policy: Policy) -> None:
+@pytest.mark.vpy("no-policy")
+async def test_client_reload_script(server: ServerFactory, tmp_path: Path) -> None:
     """Test client triggering a server script reload after modifying the script on disk."""
     script_file = tmp_path / "reload_test.vpy"
     script_file.write_text(
@@ -599,104 +549,80 @@ async def test_client_reload_script(tmp_path: Path, port: int, vpy_policy: Polic
         encoding="utf-8",
     )
 
-    runner = ScriptRunner.from_script(script_file, environment=vpy_policy)
-    daemon = ServerDaemon(runner, address=f"tcp://{HOST}:{port}")
-    ready_event = asyncio.Event()
+    async with server(script_file) as (host, port), RemoteClient(f"tcp://{host}:{port}") as client:
+        outputs = await client.list_outputs()
+        assert len(outputs) == 1
+        assert outputs[0].info.width == 100
+        assert outputs[0].info.num_frames == 5
 
-    daemon_task = asyncio.create_task(daemon.start(ready_event=ready_event))
-    await ready_event.wait()
+        # Modify script on disk
+        script_file.write_text(
+            "import vapoursynth as vs\n"
+            "core = vs.core\n"
+            "clip0 = core.std.BlankClip(width=200, height=160, format=vs.YUV420P8, length=15)\n"
+            "clip1 = core.std.BlankClip(width=50, height=40, format=vs.RGB24, length=8)\n"
+            "clip0.set_output(0)\n"
+            "clip1.set_output(1)\n",
+            encoding="utf-8",
+        )
 
-    try:
-        async with RemoteClient(f"tcp://{HOST}:{port}") as client:
-            outputs = await client.list_outputs()
-            assert len(outputs) == 1
-            assert outputs[0].info.width == 100
-            assert outputs[0].info.num_frames == 5
+        # Trigger reload via client
+        new_outputs = await client.reload()
+        assert len(new_outputs) == 2
+        assert new_outputs[0].index == 0
+        assert new_outputs[0].info.width == 200
+        assert new_outputs[0].info.num_frames == 15
+        assert new_outputs[1].index == 1
+        assert new_outputs[1].info.width == 50
+        assert new_outputs[1].info.num_frames == 8
 
-            # Modify script on disk
-            script_file.write_text(
-                "import vapoursynth as vs\n"
-                "core = vs.core\n"
-                "clip0 = core.std.BlankClip(width=200, height=160, format=vs.YUV420P8, length=15)\n"
-                "clip1 = core.std.BlankClip(width=50, height=40, format=vs.RGB24, length=8)\n"
-                "clip0.set_output(0)\n"
-                "clip1.set_output(1)\n",
-                encoding="utf-8",
-            )
-
-            # Trigger reload via client
-            new_outputs = await client.reload()
-            assert len(new_outputs) == 2
-            assert new_outputs[0].index == 0
-            assert new_outputs[0].info.width == 200
-            assert new_outputs[0].info.num_frames == 15
-            assert new_outputs[1].index == 1
-            assert new_outputs[1].info.width == 50
-            assert new_outputs[1].info.num_frames == 8
-
-            # Verify frame rendering from reloaded environment
-            header, _ = await client.request_frame(0, 10)
-            assert header.status == StatusCode.OK
-            assert header.n == 10
-    finally:
-        await daemon.stop()
-        await daemon_task
+        # Verify frame rendering from reloaded environment
+        header, _ = await client.request_frame(0, 10)
+        assert header.status == StatusCode.OK
+        assert header.n == 10
 
 
 @pytest.mark.asyncio(loop_factories=["custom"])
-@pytest.mark.vpy("initial-core")
-async def test_client_load_code_and_error_handling(port: int, vpy_policy: Policy) -> None:
+@pytest.mark.vpy("no-policy")
+async def test_client_load_code_and_error_handling(server: ServerFactory) -> None:
     """Test dynamic code execution on the server via client.load_code and error resilience."""
-    runner = ScriptRunner()
-    daemon = ServerDaemon(runner, address=f"tcp://{HOST}:{port}", allow_eval=True)
-    ready_event = asyncio.Event()
 
-    # Pre-configure policy on runner
-    runner._ensure_policy(vpy_policy)
+    async with server(ScriptRunner(), allow_eval=True) as (host, port), RemoteClient(f"tcp://{host}:{port}") as client:
+        # Execute valid code string
+        code = (
+            "import vapoursynth as vs\n"
+            "core = vs.core\n"
+            "clip = core.std.BlankClip(width=320, height=240, format=vs.YUV420P8, length=12)\n"
+            "clip.set_output(0)\n"
+        )
+        outputs = await client.load_code(code)
+        assert len(outputs) == 1
+        assert outputs[0].info.width == 320
+        assert outputs[0].info.num_frames == 12
 
-    daemon_task = asyncio.create_task(daemon.start(ready_event=ready_event))
-    await ready_event.wait()
+        header, _ = await client.request_frame(0, 5)
+        assert header.status == StatusCode.OK
 
-    try:
-        async with RemoteClient(f"tcp://{HOST}:{port}") as client:
-            # 1. Execute valid code string
-            code = (
-                "import vapoursynth as vs\n"
-                "core = vs.core\n"
-                "clip = core.std.BlankClip(width=320, height=240, format=vs.YUV420P8, length=12)\n"
-                "clip.set_output(0)\n"
-            )
-            outputs = await client.load_code(code)
-            assert len(outputs) == 1
-            assert outputs[0].info.width == 320
-            assert outputs[0].info.num_frames == 12
+        # Execute invalid code - should return error without crashing server
+        with pytest.raises(RuntimeError, match="Failed to load code"):
+            await client.load_code("this is not valid python code !!!")
 
-            header, _ = await client.request_frame(0, 5)
-            assert header.status == StatusCode.OK
-
-            # 2. Execute invalid code - should return error without crashing server
-            with pytest.raises(RuntimeError, match="Failed to load code"):
-                await client.load_code("this is not valid python code !!!")
-
-            # 3. Server remains healthy and can execute subsequent code
-            valid_code_2 = (
-                "import vapoursynth as vs\n"
-                "core = vs.core\n"
-                "clip = core.std.BlankClip(width=640, height=480, format=vs.YUV420P8, length=25)\n"
-                "clip.set_output(0)\n"
-            )
-            new_outputs = await client.load_code(valid_code_2)
-            assert len(new_outputs) == 1
-            assert new_outputs[0].info.width == 640
-            assert new_outputs[0].info.num_frames == 25
-    finally:
-        await daemon.stop()
-        await daemon_task
+        # Server remains healthy and can execute subsequent code
+        valid_code_2 = (
+            "import vapoursynth as vs\n"
+            "core = vs.core\n"
+            "clip = core.std.BlankClip(width=640, height=480, format=vs.YUV420P8, length=25)\n"
+            "clip.set_output(0)\n"
+        )
+        new_outputs = await client.load_code(valid_code_2)
+        assert len(new_outputs) == 1
+        assert new_outputs[0].info.width == 640
+        assert new_outputs[0].info.num_frames == 25
 
 
 @pytest.mark.asyncio(loop_factories=["custom"])
-@pytest.mark.vpy("initial-core")
-async def test_client_load_script_switch(tmp_path: Path, port: int, vpy_policy: Policy) -> None:
+@pytest.mark.vpy("no-policy")
+async def test_client_load_script_switch(server: ServerFactory, tmp_path: Path) -> None:
     """Test switching between different script files dynamically via client.load_script."""
     script1 = tmp_path / "script1.vpy"
     script1.write_text(
@@ -710,34 +636,23 @@ async def test_client_load_script_switch(tmp_path: Path, port: int, vpy_policy: 
         encoding="utf-8",
     )
 
-    runner = ScriptRunner.from_script(script1, environment=vpy_policy)
-    daemon = ServerDaemon(runner, address=f"tcp://{HOST}:{port}", allow_eval=True)
-    ready_event = asyncio.Event()
+    async with server(script1, allow_eval=True) as (host, port), RemoteClient(f"tcp://{host}:{port}") as client:
+        outputs1 = await client.list_outputs()
+        assert outputs1[0].info.width == 120
 
-    daemon_task = asyncio.create_task(daemon.start(ready_event=ready_event))
-    await ready_event.wait()
+        # Switch script
+        outputs2 = await client.load_script(script2)
+        assert outputs2[0].info.width == 240
+        assert outputs2[0].info.num_frames == 8
 
-    try:
-        async with RemoteClient(f"tcp://{HOST}:{port}") as client:
-            outputs1 = await client.list_outputs()
-            assert outputs1[0].info.width == 120
-
-            # Switch script
-            outputs2 = await client.load_script(script2)
-            assert outputs2[0].info.width == 240
-            assert outputs2[0].info.num_frames == 8
-
-            # Try loading nonexistent script
-            with pytest.raises(RuntimeError, match="Failed to load script"):
-                await client.load_script(tmp_path / "nonexistent.vpy")
-    finally:
-        await daemon.stop()
-        await daemon_task
+        # Try loading nonexistent script
+        with pytest.raises(RuntimeError, match="Failed to load script"):
+            await client.load_script(tmp_path / "nonexistent.vpy")
 
 
 @pytest.mark.asyncio(loop_factories=["custom"])
-@pytest.mark.vpy("initial-core")
-async def test_permission_denied_when_allow_eval_disabled(port: int, vpy_policy: Policy, tmp_path: Path) -> None:
+@pytest.mark.vpy("no-policy")
+async def test_permission_denied_when_allow_eval_disabled(server: ServerFactory, tmp_path: Path) -> None:
     """Test that dynamic code and script execution is blocked when allow_eval is False (default)."""
     script = tmp_path / "static_script.vpy"
     script.write_text(
@@ -746,111 +661,68 @@ async def test_permission_denied_when_allow_eval_disabled(port: int, vpy_policy:
         encoding="utf-8",
     )
 
-    runner = ScriptRunner.from_script(script, environment=vpy_policy)
-    daemon = ServerDaemon(runner, address=f"tcp://{HOST}:{port}", allow_eval=False)
-    ready_event = asyncio.Event()
+    async with (
+        server(script, allow_eval=False) as (host, port),
+        RemoteClient(f"tcp://{host}:{port}") as client,
+    ):
+        # Listing outputs and fetching frames should work normally
+        outputs = await client.list_outputs()
+        assert len(outputs) == 1
 
-    daemon_task = asyncio.create_task(daemon.start(ready_event=ready_event))
-    await ready_event.wait()
+        # Dynamic code loading must fail with permission denied error
+        with pytest.raises(RuntimeError, match="Dynamic code evaluation is disabled on this server"):
+            await client.load_code("core.std.BlankClip().set_output(0)")
 
-    try:
-        async with RemoteClient(f"tcp://{HOST}:{port}") as client:
-            # Listing outputs and fetching frames should work normally
-            outputs = await client.list_outputs()
-            assert len(outputs) == 1
-
-            # Dynamic code loading must fail with permission denied error
-            with pytest.raises(RuntimeError, match="Dynamic code evaluation is disabled on this server"):
-                await client.load_code("core.std.BlankClip().set_output(0)")
-
-            # Dynamic script switching must fail with permission denied error
-            with pytest.raises(RuntimeError, match="Dynamic script loading is disabled on this server"):
-                await client.load_script(script)
-    finally:
-        await daemon.stop()
-        await daemon_task
+        # Dynamic script switching must fail with permission denied error
+        with pytest.raises(RuntimeError, match="Dynamic script loading is disabled on this server"):
+            await client.load_script(script)
 
 
 @pytest.mark.asyncio(loop_factories=["custom"])
 @pytest.mark.vpy("initial-core")
-async def test_auth_token_security(port: int, test_clip: vs.VideoNode) -> None:
+async def test_auth_token_security(server: ServerFactory, test_clip: vs.VideoNode) -> None:
     """Test authentication token enforcement on ServerDaemon."""
     token = "secret_access_token_xyz"
-    runner = ScriptRunner.from_clips([test_clip])
-    daemon = ServerDaemon(runner, address=f"tcp://{HOST}:{port}", auth_token=token)
-    ready_event = asyncio.Event()
-
-    daemon_task = asyncio.create_task(daemon.start(ready_event=ready_event))
-    await ready_event.wait()
-
-    try:
-        # 1. Connecting without token -> should fail operations with unauthorized / ConnectionReset
-        async with RemoteClient(f"tcp://{HOST}:{port}", auth_token=None) as client_unauthed:
+    async with server([test_clip], auth_token=token) as (host, port):
+        # Connecting without token -> should fail operations with unauthorized / ConnectionReset
+        async with RemoteClient(f"tcp://{host}:{port}", auth_token=None) as client_unauthed:
             assert (await client_unauthed.ping()) is False
             with pytest.raises(RuntimeError, match="Failed to list outputs"):
                 await client_unauthed.list_outputs()
 
-        # 2. Connecting with wrong token -> should fail
-        async with RemoteClient(f"tcp://{HOST}:{port}", auth_token="wrong_token_abc") as client_wrong:
+        # Connecting with wrong token -> should fail
+        async with RemoteClient(f"tcp://{host}:{port}", auth_token="wrong_token_abc") as client_wrong:
             assert (await client_wrong.ping()) is False
             with pytest.raises(RuntimeError, match="Failed to list outputs"):
                 await client_wrong.list_outputs()
 
-        # 3. Connecting with valid token -> should succeed
-        async with RemoteClient(f"tcp://{HOST}:{port}", auth_token=token) as client_authed:
+        # Connecting with valid token -> should succeed
+        async with RemoteClient(f"tcp://{host}:{port}", auth_token=token) as client_authed:
             assert (await client_authed.ping()) is True
             outputs = await client_authed.list_outputs()
             assert len(outputs) == 1
             header, _ = await client_authed.request_frame(0, 0)
             assert header.status == StatusCode.OK
-    finally:
-        await daemon.stop()
-        await daemon_task
 
 
 @pytest.mark.vpy("initial-core")
-def test_curvezmq_end_to_end_encryption(port: int, test_clip: vs.VideoNode) -> None:
+def test_curvezmq_end_to_end_encryption(server: ServerFactory, test_clip: vs.VideoNode) -> None:
     """Test ZeroMQ CurveZMQ end-to-end encrypted connection and frame streaming."""
-    # Generate server Curve keypair
     server_public, server_secret = zmq.curve_keypair()
 
-    runner = ScriptRunner.from_clips([test_clip])
-    daemon = ServerDaemon(
-        runner,
-        address=f"tcp://{HOST}:{port}",
-        curve_secret_key=server_secret,
-        curve_public_key=server_public,
-    )
-    ready_event = threading.Event()
-    loop = asyncio.SelectorEventLoop()
+    with (
+        server([test_clip], curve_secret_key=server_secret, curve_public_key=server_public) as (host, port),
+        RemoteClient(f"tcp://{host}:{port}", curve_server_key=server_public) as client,
+    ):
+        assert client.ping().result() is True
+        outputs = client.list_outputs().result()
+        assert len(outputs) == 1
 
-    thread = threading.Thread(
-        target=lambda: loop.run_until_complete(daemon.start(ready_event=ready_event)),
-        name="CurveServerThread",
-        daemon=True,
-    )
-    thread.start()
-    assert ready_event.wait(timeout=5.0)
-
-    try:
-        address = f"tcp://{HOST}:{port}"
-        # Connect client using server's public key (client ephemeral keypair is generated automatically)
-        with RemoteClient(address, curve_server_key=server_public) as client:
-            assert client.ping().result() is True
-            outputs = client.list_outputs().result()
-            assert len(outputs) == 1
-
-            # Fetch encrypted frame proxy via source()
-            proxy = source(address, output=0, curve_server_key=server_public)
-            frame = proxy.get_frame(0)
-            assert frame.width == test_clip.width
-            assert bytes(frame[0]) == bytes(test_clip.get_frame(0)[0])
-    finally:
-        fut = asyncio.run_coroutine_threadsafe(daemon.stop(), loop)
-        fut.result(timeout=5.0)
-        thread.join(timeout=2.0)
-        if not loop.is_closed():
-            loop.close()
+        # Fetch encrypted frame proxy via source()
+        proxy = source(f"tcp://{host}:{port}", output=0, curve_server_key=server_public)
+        frame = proxy.get_frame(0)
+        assert frame.width == test_clip.width
+        assert bytes(frame[0]) == bytes(test_clip.get_frame(0)[0])
 
 
 @pytest.mark.vpy("initial-core")
@@ -869,79 +741,40 @@ def test_client_get_outputs(running_server: tuple[str, int]) -> None:
 
 
 @pytest.mark.vpy("initial-core")
-def test_remote_traceback_propagation(port: int) -> None:
+def test_remote_traceback_propagation(server: ServerFactory) -> None:
     """Test that server evaluation errors include formatted remote traceback."""
-    core = vs.core
     # Create a clip that raises an error on frame 1
-    src = core.std.BlankClip(width=64, height=64, length=5)
+    clip = core.std.BlankClip(width=64, height=64, length=5)
 
     def faulty_filter(n: int, f: vs.VideoFrame) -> vs.VideoFrame:
         if n == 1:
             raise ValueError("Intentional error inside custom filter")
         return f
 
-    faulty_clip = core.std.ModifyFrame(src, src, faulty_filter)
-    runner = ScriptRunner.from_clips([faulty_clip])
-    daemon = ServerDaemon(runner, address=f"tcp://{HOST}:{port}")
-    ready_event = threading.Event()
-    loop = asyncio.SelectorEventLoop()
+    faulty_clip = clip.std.ModifyFrame(clip, faulty_filter)
 
-    thread = threading.Thread(
-        target=lambda: loop.run_until_complete(daemon.start(ready_event=ready_event)),
-        daemon=True,
-    )
-    thread.start()
-    assert ready_event.wait(timeout=5.0)
-
-    try:
-        with RemoteClient(f"tcp://{HOST}:{port}") as client:
-            clip = client.get_output(0)
-            # Frame 0 succeeds
-            assert clip.get_frame(0).width == 64
-            # Frame 1 fails and includes remote traceback
-            with pytest.raises((vs.Error, RuntimeError)) as exc_info:
-                clip.get_frame(1)
-            err_msg = str(exc_info.value)
-            assert "Intentional error inside custom filter" in err_msg
-            assert "[Remote Traceback]" in err_msg
-    finally:
-        fut = asyncio.run_coroutine_threadsafe(daemon.stop(), loop)
-        fut.result(timeout=5.0)
-        thread.join(timeout=2.0)
-        if not loop.is_closed():
-            loop.close()
+    with server([faulty_clip]) as (host, port), RemoteClient(f"tcp://{host}:{port}") as client:
+        clip = client.get_output(0)
+        # Frame 0 succeeds
+        assert clip.get_frame(0)
+        # Frame 1 fails and includes remote traceback
+        with pytest.raises((vs.Error, RuntimeError)) as exc_info:
+            clip.get_frame(1)
+        err_msg = str(exc_info.value)
+        assert "Intentional error inside custom filter" in err_msg
+        assert "[Remote Traceback]" in err_msg
 
 
 @pytest.mark.vpy("initial-core")
-def test_strided_copy_non_aligned(port: int) -> None:
+def test_strided_copy_non_aligned(server: ServerFactory) -> None:
     """Test that clips with unaligned dimensions requiring strided line-by-line copies work perfectly."""
-    core = vs.core
     # Odd width on RGB24 creates stride > row_size on standard aligned blank clips
     unaligned_clip = core.std.BlankClip(width=157, height=93, format=vs.RGB24, length=5, color=[120, 80, 200])
-    runner = ScriptRunner.from_clips([unaligned_clip])
-    daemon = ServerDaemon(runner, address=f"tcp://{HOST}:{port}")
-    ready_event = threading.Event()
-    loop = asyncio.SelectorEventLoop()
-
-    thread = threading.Thread(
-        target=lambda: loop.run_until_complete(daemon.start(ready_event=ready_event)),
-        daemon=True,
-    )
-    thread.start()
-    assert ready_event.wait(timeout=5.0)
-
-    try:
-        with RemoteClient(f"tcp://{HOST}:{port}", compression="none") as client:
-            clip = client.get_output(0)
-            assert clip.width == 157
-            assert clip.height == 93
-            frame = clip.get_frame(0)
-            orig_frame = unaligned_clip.get_frame(0)
-            for p in range(3):
-                assert bytes(frame[p]) == bytes(orig_frame[p])
-    finally:
-        fut = asyncio.run_coroutine_threadsafe(daemon.stop(), loop)
-        fut.result(timeout=5.0)
-        thread.join(timeout=2.0)
-        if not loop.is_closed():
-            loop.close()
+    with server([unaligned_clip]) as (host, port), RemoteClient(f"tcp://{host}:{port}", compression="none") as client:
+        clip = client.get_output(0)
+        assert clip.width == 157
+        assert clip.height == 93
+        frame = clip.get_frame(0)
+        orig_frame = unaligned_clip.get_frame(0)
+        for p in range(3):
+            assert bytes(frame[p]) == bytes(orig_frame[p])
