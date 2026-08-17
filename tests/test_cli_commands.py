@@ -12,9 +12,9 @@ import vapoursynth as vs
 from vsengine.futures import UnifiedFuture
 from vsengine.policy import ManagedEnvironment, Policy
 
-from vsremote.client.transport import ClientTransport
+from vsremote.cli import ClientConfig, _get_y4m_header, app, info, keygen, ping, pipe, serve
+from vsremote.client import ClientTransport
 from vsremote.protocol import ClipInfo, FrameHeader, PlaneInfo, StatusCode
-from vsremote.server.cli import ClientConfig, _get_y4m_header, app, info, keygen, ping, pipe, serve
 
 if TYPE_CHECKING:
     from conftest import ServerFactory

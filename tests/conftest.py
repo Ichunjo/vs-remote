@@ -12,8 +12,8 @@ import pytest
 import vapoursynth as vs
 from vsengine.policy import Policy
 
+from vsremote.cli import serve
 from vsremote.protocol import Compression
-from vsremote.server.cli import serve
 from vsremote.server.daemon import ServerDaemon
 from vsremote.server.runner import ScriptRunner
 

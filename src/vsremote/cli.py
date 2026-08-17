@@ -19,13 +19,13 @@ from rich.console import Console, ConsoleOptions
 from rich.table import Table
 from vsengine import ManagedEnvironment, Policy, UnifiedFuture
 
-from ..client.transport import ClientTransport
-from ..protocol.codec import decompress_plane
-from ..protocol.constants import DEFAULT_ADDRESS, Compression, StatusCode
-from ..protocol.messages import ClipInfo, FrameHeader
-from ..utils import console, setup_logging
-from .daemon import ServerDaemon
-from .runner import ScriptRunner
+from .client.transport import ClientTransport
+from .protocol.codec import decompress_plane
+from .protocol.constants import DEFAULT_ADDRESS, Compression, StatusCode
+from .protocol.messages import ClipInfo, FrameHeader
+from .server.daemon import ServerDaemon
+from .server.runner import ScriptRunner
+from .utils import console, setup_logging
 
 logger = logging.getLogger(__name__)
 

@@ -33,7 +33,7 @@ dependencies = [
 ]
 
 [project.scripts]
-vsremote = "vsremote.server.cli:main"
+vsremote = "vsremote.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vsremote"]

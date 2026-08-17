@@ -10,8 +10,8 @@ import pytest
 import vapoursynth as vs
 from vsengine.policy import Policy
 
+from vsremote.cli import app, keygen, serve
 from vsremote.client import RemoteClient, source
-from vsremote.server.cli import app, keygen, serve
 
 if TYPE_CHECKING:
     from conftest import ServerFactory
