@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import ctypes
 
-from mypy_extensions import i32, i64
+try:
+    from mypy_extensions import i32, i64
+except ImportError:
+    i32 = i64 = int  # type: ignore[assignment, misc]
+
 
 _PyBytes_AsString = ctypes.pythonapi.PyBytes_AsString
 _PyBytes_AsString.argtypes = [ctypes.py_object]
