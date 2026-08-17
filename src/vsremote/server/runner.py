@@ -10,7 +10,7 @@ from typing import Self
 
 import vapoursynth as vs
 from vsengine.policy import ContextVarStore, ManagedEnvironment, Policy
-from vsengine.vpy import Script, load_code, load_script
+from vsengine.vpy import ExecutionError, Script, load_code, load_script
 
 from ..api.output import _output_metadata
 from ..protocol import ClipInfo, OutputItem, StreamEvent
@@ -104,7 +104,11 @@ class ScriptRunner:
             with capture_streams(self._startup_events.append):
                 self._script = load_script(path, env, module="__vsremote__", chdir=working_dir)
                 self._environment = self._script.environment
-                self._script.result()
+                try:
+                    self._script.result()
+                except ExecutionError as error:
+                    self._script.dispose()
+                    raise error from None
 
             return self._extract_outputs()
 
@@ -139,7 +143,11 @@ class ScriptRunner:
             with capture_streams(self._startup_events.append):
                 self._script = load_code(code, env, module="__vsremote__", filename=fn, chdir=chdir)
                 self._environment = self._script.environment
-                self._script.result()
+                try:
+                    self._script.result()
+                except ExecutionError as error:
+                    self._script.dispose()
+                    raise error from None
 
             return self._extract_outputs()
 
