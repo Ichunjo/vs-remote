@@ -17,7 +17,7 @@ class CustomBuildHook(BuildHookInterface[Any]):
 
     @override
     def initialize(self, version: str, build_data: dict[str, Any]) -> None:
-        if self.target_name != "wheel":
+        if self.target_name != "wheel" or version == "editable":
             return
 
         build_data["pure_python"] = False
