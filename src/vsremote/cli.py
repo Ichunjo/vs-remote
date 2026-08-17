@@ -20,11 +20,8 @@ from rich.table import Table
 from vsengine import ManagedEnvironment, Policy, UnifiedFuture
 
 from .client.transport import ClientTransport
-from .protocol.codec import decompress_plane
-from .protocol.constants import DEFAULT_ADDRESS, Compression, StatusCode
-from .protocol.messages import ClipInfo, FrameHeader
-from .server.daemon import ServerDaemon
-from .server.runner import ScriptRunner
+from .protocol import DEFAULT_ADDRESS, ClipInfo, Compression, FrameHeader, StatusCode, decompress_plane
+from .server import ScriptRunner, ServerDaemon
 from .utils import console, setup_logging
 
 logger = logging.getLogger(__name__)

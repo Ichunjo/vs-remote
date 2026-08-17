@@ -10,7 +10,7 @@ from typing import Literal, TextIO, override
 
 import msgspec
 
-from ..protocol.messages import RemoteLogRecord, StreamEvent, StreamOutputEvent
+from ..protocol import RemoteLogRecord, StreamEvent, StreamOutputEvent
 
 _IN_LOGGING = threading.local()
 _ORIG_HANDLER_HANDLE = Handler.handle

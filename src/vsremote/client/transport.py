@@ -13,10 +13,11 @@ import zmq
 from typing_extensions import TypeForm
 from vsengine.futures import UnifiedFuture
 
-from ..protocol.codec import pack_payload, unpack_payload
-from ..protocol.constants import DEFAULT_ADDRESS, Command, Compression, StatusCode
-from ..protocol.messages import (
+from ..protocol import (
+    DEFAULT_ADDRESS,
     ClipInfo,
+    Command,
+    Compression,
     FrameHeader,
     FrameRequest,
     LoadCodeRequest,
@@ -26,9 +27,12 @@ from ..protocol.messages import (
     ReloadRequest,
     RemoteLogRecord,
     ResponseEnvelope,
+    StatusCode,
     StreamEvent,
     StreamOutputEvent,
     StreamSubscribeRequest,
+    pack_payload,
+    unpack_payload,
 )
 
 logger = getLogger(__name__)
