@@ -1,0 +1,55 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "**.py"
+      - "**/pyproject.toml"
+      - "uv.lock"
+  pull_request:
+    paths:
+      - "**.py"
+      - "**/pyproject.toml"
+      - "uv.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  UV_NO_SYNC: "1"
+
+jobs:
+  lint-python:
+    name: Lint Python
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d # v10.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --all-groups --all-packages
+
+      - name: Run Ruff check
+        id: ruff-check
+        run: uv run ruff check .
+
+      - name: Run Ruff format
+        id: ruff-format
+        if: success() || (failure() && steps.ruff-check.conclusion == 'failure')
+        run: uv run ruff format --check --diff
+
+      - name: Running mypy
+        if: success() || (failure() && (steps.ruff-check.conclusion == 'failure' || steps.ruff-format.conclusion == 'failure'))
+        run: uv run mypy .
