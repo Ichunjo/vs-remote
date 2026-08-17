@@ -133,7 +133,7 @@ def serve(
         )
 
         async def run() -> None:
-            if sys.platform != "win32":
+            if sys.platform != "win32" and threading.current_thread() is threading.main_thread():
                 loop = asyncio.get_running_loop()
                 for sig in (signal.SIGINT, signal.SIGTERM):
                     loop.add_signal_handler(sig, lambda: asyncio.create_task(daemon.stop()))

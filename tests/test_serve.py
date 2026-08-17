@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import sys
+import threading
 from collections.abc import Awaitable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -138,3 +140,32 @@ def test_serve_keyboard_interrupt(port: int, tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(asyncio.BaseEventLoop, "run_until_complete", mock_run_until_complete)
 
     serve(script_file, address=f"tcp://{HOST}:{port}")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal handling in worker thread test")
+@pytest.mark.vpy("no-core")
+def test_serve_in_thread_posix(tmp_path: Path, vpy_policy: Policy, port: int) -> None:
+    """Test that serve runs cleanly in a background thread on POSIX platforms without signal handler errors."""
+    script_file = tmp_path / "thread_test.vpy"
+    script_file.write_text(
+        "import vapoursynth as vs\ncore = vs.core\nclip = core.std.BlankClip()\nclip.set_output(0)\n",
+        encoding="utf-8",
+    )
+
+    ready_event = threading.Event()
+    stop_event = threading.Event()
+
+    def run_serve() -> None:
+        serve(
+            script_file,
+            address=f"tcp://{HOST}:{port}",
+            ready_event=ready_event,
+            stop_event=stop_event,
+            environment=vpy_policy,
+        )
+
+    t = threading.Thread(target=run_serve, daemon=True)
+    t.start()
+    assert ready_event.wait(timeout=5.0)
+    stop_event.set()
+    t.join(timeout=3.0)
