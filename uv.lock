@@ -779,6 +779,15 @@ wheels = [
 ]
 
 [[package]]
+name = "types-mypy-extensions"
+version = "1.1.0.20260724"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/47/eb5c714ea440f00ddc8001ba2338d27b58d3b391ecf9ea3669141a41fc88/types_mypy_extensions-1.1.0.20260724.tar.gz", hash = "sha256:e60c3427b2241ae778626a49c50a2fd80888b5d0e8ac20b567b629f2c8fab87b", size = 10057, upload-time = "2026-07-24T04:57:58.535Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/23/d19f66fcadd0483d8695727e14b4840355f4c5c3fc366e07e480106baec7/types_mypy_extensions-1.1.0.20260724-py3-none-any.whl", hash = "sha256:0aa41c33e09f567fa19be906a1f9d1a7b981ddac409efc9b2177109d0f6a1232", size = 8555, upload-time = "2026-07-24T04:57:57.682Z" },
+]
+
+[[package]]
 name = "types-setuptools"
 version = "84.0.0.20260812"
 source = { registry = "https://pypi.org/simple" }
@@ -859,6 +868,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "setuptools" },
+    { name = "types-mypy-extensions" },
     { name = "types-setuptools" },
     { name = "vsstubs" },
 ]
@@ -883,6 +893,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "ruff", specifier = "~=0.16.0" },
     { name = "setuptools", specifier = ">=84.0.0" },
+    { name = "types-mypy-extensions", specifier = ">=1.1.0.20260724" },
     { name = "types-setuptools", specifier = ">=84.0.0.20260812" },
     { name = "vsstubs", specifier = ">=2.3.0" },
 ]

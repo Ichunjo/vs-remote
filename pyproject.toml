@@ -9,7 +9,6 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vs-remote"
-version = "0.1.0"
 description = "Remote execution and frame proxy for VapourSynth"
 readme = "README.md"
 license-files = ["LICENSE"]
@@ -50,6 +49,7 @@ dev = [
     "pytest-cov>=7.1.0",
     "ruff~=0.16.0",
     "setuptools>=84.0.0",
+    "types-mypy-extensions>=1.1.0.20260724",
     "types-setuptools>=84.0.0.20260812",
     "vsstubs>=2.3.0",
 ]
