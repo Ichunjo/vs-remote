@@ -104,29 +104,67 @@ class RemoteClient:
         return self.transport.list_outputs()
 
     def load_script(self, script_path: str | os.PathLike[str], chdir: bool = True) -> UnifiedFuture[list[OutputItem]]:
-        """Request the remote server to load or switch to a script file."""
+        """
+        Request the remote server to load or switch to a script file.
+
+        Args:
+            script_path: Path to the script file to load.
+            chdir: Change the current working directory of the remote server to the script directory before loading.
+
+        Returns:
+            A future that resolves to a list of output clips.
+        """
         return self.transport.load_script(script_path, chdir=chdir)
 
     def load_code(self, code: str, filename: str = "<remote_code>") -> UnifiedFuture[list[OutputItem]]:
-        """Send Python/VapourSynth code to execute dynamically on the remote server."""
+        """
+        Send Python code to execute dynamically on the remote server.
+
+        Args:
+            code: The Python code to execute.
+            filename: The filename to use for the code.
+
+        Returns:
+            A future that resolves to a list of output clips.
+        """
         return self.transport.load_code(code, filename=filename)
 
     def reload(self, chdir: bool = True) -> UnifiedFuture[list[OutputItem]]:
-        """Request the remote server to reload its active script file from disk."""
+        """
+        Request the remote server to reload its active script file from disk.
+
+        Args:
+            chdir: Change the current working directory of the remote server to the script directory before reloading.
+
+        Returns:
+            A future that resolves to a list of output clips.
+        """
         return self.transport.reload(chdir=chdir)
 
     def get_clip_info(self, output_index: int = 0) -> UnifiedFuture[ClipInfo]:
-        """Fetch static clip metadata for the specified output index."""
+        """
+        Request static clip metadata for the specified output index.
+
+        Args:
+            output_index: Output index on the server.
+
+        Returns:
+            A future that resolves to the clip info.
+        """
         return self.transport.get_clip_info(output_index)
 
-    def request_frame(
-        self,
-        output_index: int,
-        n: int,
-        compression: Compression | None = None,
-    ) -> UnifiedFuture[tuple[FrameHeader, list[bytes]]]:
-        """Request a specific frame from the server directly."""
-        return self.transport.request_frame(output_index, n, compression=compression or self.compression)
+    def request_frame(self, output_index: int, n: int) -> UnifiedFuture[tuple[FrameHeader, list[bytes]]]:
+        """
+        Request a specific frame from the remote server.
+
+        Args:
+            output_index: Output index on the server.
+            n: Frame number to request.
+
+        Returns:
+            A future that resolves to a tuple of frame header and plane data.
+        """
+        return self.transport.request_frame(output_index, n, compression=self.compression)
 
     def get_output(self, output_index: int = 0, prefetch: int = 4) -> vs.VideoNode:
         """
@@ -315,8 +353,7 @@ def create_remote_vnode(
 
     def fetch_frame(n: int, f: vs.VideoFrame) -> vs.VideoFrame:
         with lock:
-            fut = inflight.pop(n, None)
-            if fut is None:
+            if (fut := inflight.pop(n, None)) is None:
                 fut = transport.request_frame(output_index, n, compression=compression)
 
             # Fire ahead-of-time prefetch requests for the next `prefetch` frames
@@ -341,8 +378,7 @@ def create_remote_vnode(
         f_out = f.copy()
 
         # Populate frame properties
-        for key, value in header.props.items():
-            f_out.props[key] = value
+        f_out.props.update(header.props)
 
         # Decompress and copy planar bytes into the frame buffer
         for p in range(info.num_planes):
