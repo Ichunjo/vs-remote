@@ -43,8 +43,15 @@ jobs:
 
       - name: Build ${{ inputs.dist }}
         env:
-          VSREMOTE_BUILD_PURE_PYTHON: ${{ inputs.pure-python && '1' || '' }}
+          VSREMOTE_BUILD_PURE_PYTHON: ${{ inputs.pure-python }}
         run: uv build --${{ inputs.dist }}
+
+      - name: Repair wheel (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          uvx --with patchelf auditwheel repair --strip dist/*.whl -w repaired_wheels
+          rm dist/*.whl
+          mv repaired_wheels/*.whl dist/
 
       - name: Upload ${{ inputs.dist }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
