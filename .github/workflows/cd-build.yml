@@ -47,7 +47,7 @@ jobs:
         run: uv build --${{ inputs.dist }}
 
       - name: Repair wheel (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && !inputs.pure-python && inputs.dist == 'wheel'
         run: |
           uvx --with patchelf auditwheel repair --strip dist/*.whl -w repaired_wheels
           rm dist/*.whl
