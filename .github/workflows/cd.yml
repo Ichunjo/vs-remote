@@ -13,99 +13,33 @@ jobs:
   build-sdist:
     uses: ./.github/workflows/cd-build.yml
     with:
-      python-version: "3.12"
+      python-versions: '["3.12"]'
       os: ubuntu-slim
       dist: sdist
 
   build-generic:
     uses: ./.github/workflows/cd-build.yml
     with:
-      python-version: "3.12"
+      python-versions: '["3.12"]'
       os: ubuntu-slim
       dist: wheel
       pure-python: true
 
-  build-windows-cp312:
+  build-windows:
     uses: ./.github/workflows/cd-build.yml
     with:
-      python-version: "3.12"
       os: windows-2025-vs2026
       dist: wheel
 
-  build-windows-cp313:
+  build-linux:
     uses: ./.github/workflows/cd-build.yml
     with:
-      python-version: "3.13"
-      os: windows-2025-vs2026
-      dist: wheel
-
-  build-windows-cp314:
-    uses: ./.github/workflows/cd-build.yml
-    with:
-      python-version: "3.14"
-      os: windows-2025-vs2026
-      dist: wheel
-
-  build-windows-cp315:
-    uses: ./.github/workflows/cd-build.yml
-    with:
-      python-version: "3.15"
-      os: windows-2025-vs2026
-      dist: wheel
-
-  build-linux-cp312:
-    uses: ./.github/workflows/cd-build.yml
-    with:
-      python-version: "3.12"
       os: ubuntu-22.04
       dist: wheel
 
-  build-linux-cp313:
+  build-macos:
     uses: ./.github/workflows/cd-build.yml
     with:
-      python-version: "3.13"
-      os: ubuntu-22.04
-      dist: wheel
-
-  build-linux-cp314:
-    uses: ./.github/workflows/cd-build.yml
-    with:
-      python-version: "3.14"
-      os: ubuntu-22.04
-      dist: wheel
-
-  build-linux-cp315:
-    uses: ./.github/workflows/cd-build.yml
-    with:
-      python-version: "3.15"
-      os: ubuntu-22.04
-      dist: wheel
-
-  build-macos-cp312:
-    uses: ./.github/workflows/cd-build.yml
-    with:
-      python-version: "3.12"
-      os: macos-15
-      dist: wheel
-
-  build-macos-cp313:
-    uses: ./.github/workflows/cd-build.yml
-    with:
-      python-version: "3.13"
-      os: macos-15
-      dist: wheel
-
-  build-macos-cp314:
-    uses: ./.github/workflows/cd-build.yml
-    with:
-      python-version: "3.14"
-      os: macos-15
-      dist: wheel
-
-  build-macos-cp315:
-    uses: ./.github/workflows/cd-build.yml
-    with:
-      python-version: "3.15"
       os: macos-15
       dist: wheel
 
@@ -113,18 +47,10 @@ jobs:
     name: Publish PyPI
     needs:
       - build-sdist
-      - build-windows-cp312
-      - build-windows-cp313
-      - build-windows-cp314
-      - build-windows-cp315
-      - build-linux-cp312
-      - build-linux-cp313
-      - build-linux-cp314
-      - build-linux-cp315
-      - build-macos-cp312
-      - build-macos-cp313
-      - build-macos-cp314
-      - build-macos-cp315
+      - build-generic
+      - build-windows
+      - build-linux
+      - build-macos
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
 

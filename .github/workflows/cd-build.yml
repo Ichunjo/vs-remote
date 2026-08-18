@@ -2,9 +2,10 @@ name: Build
 on:
   workflow_call:
     inputs:
-      python-version:
-        required: true
+      python-versions:
+        required: false
         type: string
+        default: '["3.12", "3.13", "3.14", "3.15"]'
       os:
         required: true
         type: string
@@ -18,9 +19,14 @@ on:
         default: false
 
 jobs:
-  wheels:
-    name: Build wheel (${{ inputs.os }})
+  build:
+    name: Build ${{ inputs.dist }} (${{ inputs.os }} - ${{ matrix.python-version }})
     runs-on: ${{ inputs.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ${{ fromJson(inputs.python-versions) }}
 
     steps:
       - name: Checkout repository
@@ -33,7 +39,7 @@ jobs:
         uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d # v10.0.0
         with:
           enable-cache: false
-          python-version: ${{ inputs.python-version }}
+          python-version: ${{ matrix.python-version }}
 
       - name: Build ${{ inputs.dist }}
         env:
@@ -43,5 +49,5 @@ jobs:
       - name: Upload ${{ inputs.dist }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: ${{ inputs.dist }}
-          path: dist/${{ '*.tar.gz' && inputs.dist == 'sdist' || '*.whl' }}
+          name: dist-${{ inputs.dist }}-${{ inputs.os }}-${{ matrix.python-version }}
+          path: dist/${{ inputs.dist == 'sdist' && '*.tar.gz' || '*.whl' }}
