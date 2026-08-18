@@ -166,13 +166,15 @@ class RemoteClient:
         """
         return self.transport.request_frame(output_index, n, compression=self.compression)
 
-    def get_output(self, output_index: int = 0, prefetch: int = 4) -> vs.VideoNode:
+    def get_output(self, output_index: int = 0, prefetch: int = 4, backlog: int | None = None) -> vs.VideoNode:
         """
         Create a local VideoNode proxy mirroring a remote output clip.
 
         Args:
             output_index: Output index on the server.
             prefetch: Number of subsequent frames to prefetch asynchronously ahead of time (0 to disable).
+            backlog: Maximum number of in-flight and prefetched frame requests buffered
+                (defaults to max(prefetch * 3, prefetch)).
 
         Returns:
             A vs.VideoNode that lazily requests and renders frames from the server.
@@ -182,20 +184,23 @@ class RemoteClient:
             output_index=output_index,
             compression=self.compression,
             prefetch=prefetch,
+            backlog=backlog,
         )
 
-    def get_outputs(self, prefetch: int = 4) -> dict[int, vs.VideoNode]:
+    def get_outputs(self, prefetch: int = 4, backlog: int | None = None) -> dict[int, vs.VideoNode]:
         """
         Create local VideoNode proxies for all available outputs on the remote server.
 
         Args:
             prefetch: Number of subsequent frames to prefetch asynchronously ahead of time (0 to disable).
+            backlog: Maximum number of in-flight and prefetched frame requests buffered
+                (defaults to max(prefetch * 3, prefetch)).
 
         Returns:
             A dictionary mapping output index to its corresponding vs.VideoNode proxy.
         """
         outputs = self.list_outputs().result(timeout=30.0)
-        return {item.index: self.get_output(item.index, prefetch=prefetch) for item in outputs}
+        return {item.index: self.get_output(item.index, prefetch=prefetch, backlog=backlog) for item in outputs}
 
     def _handle_event(self, event: StreamEvent) -> None:
         match event:
@@ -237,6 +242,7 @@ def source(
     output: int = 0,
     compression: Compression = "zstd",
     prefetch: int = 4,
+    backlog: int | None = None,
     *,
     auth_token: str | None = None,
     curve_server_key: str | bytes | None = None,
@@ -254,12 +260,14 @@ def source(
     output: int = 0,
     compression: Compression = "zstd",
     prefetch: int = 4,
+    backlog: int | None = None,
 ) -> vs.VideoNode: ...
 def source(
     address_or_transport: str | ClientTransport = DEFAULT_ADDRESS,
     output: int = 0,
     compression: Compression = "zstd",
     prefetch: int = 4,
+    backlog: int | None = None,
     *,
     auth_token: str | None = None,
     curve_server_key: str | bytes | None = None,
@@ -283,11 +291,13 @@ def source(
         address_or_transport: Remote server address or existing transport.
         output: Remote output index to bind to (default 0).
         compression: Preferred plane compression (default: zstd).
+        prefetch: Number of subsequent frames to prefetch ahead of time (default 4).
+        backlog: Maximum number of in-flight and prefetched frame requests buffered
+            (defaults to max(prefetch * 3, prefetch)).
         auth_token: Optional authentication token.
         curve_server_key: Optional CurveZMQ server public key for end-to-end encryption.
         curve_public_key: Optional CurveZMQ client public key.
         curve_secret_key: Optional CurveZMQ client secret key.
-        prefetch: Number of subsequent frames to prefetch ahead of time (default 4).
         stdout: Target stream or callable for remote stdout.
         stderr: Target stream or callable for remote stderr.
         forward_logs: Whether to dispatch remote LogRecords to client logging system.
@@ -315,7 +325,13 @@ def source(
     else:
         trans = address_or_transport
 
-    return create_remote_vnode(transport=trans, output_index=output, compression=compression, prefetch=prefetch)
+    return create_remote_vnode(
+        transport=trans,
+        output_index=output,
+        compression=compression,
+        prefetch=prefetch,
+        backlog=backlog,
+    )
 
 
 def create_remote_vnode(
@@ -323,6 +339,7 @@ def create_remote_vnode(
     output_index: int,
     compression: Compression,
     prefetch: int = 4,
+    backlog: int | None = None,
 ) -> vs.VideoNode:
     """
     Construct a VapourSynth VideoNode that lazily requests and renders frames from a remote server.
@@ -332,6 +349,8 @@ def create_remote_vnode(
         output_index: Output index of the clip on the remote server.
         compression: Preferred plane compression algorithm.
         prefetch: Number of subsequent frames to prefetch asynchronously ahead of time (0 to disable).
+        backlog: Maximum number of in-flight and prefetched frame requests buffered
+            (defaults to max(prefetch * 3, prefetch)).
 
     Returns:
         A standard vs.VideoNode proxy.
@@ -348,6 +367,13 @@ def create_remote_vnode(
         keep=True,
     )
 
+    prefetch = max(prefetch, 0)
+
+    if backlog is None or backlog < 0:
+        backlog = max(prefetch * 3, prefetch)
+    elif backlog < prefetch:
+        backlog = prefetch
+
     inflight = dict[int, UnifiedFuture[tuple[FrameHeader, list[bytes]]]]()
     lock = threading.Lock()
 
@@ -356,17 +382,19 @@ def create_remote_vnode(
             if (fut := inflight.pop(n, None)) is None:
                 fut = transport.request_frame(output_index, n, compression=compression)
 
-            # Fire ahead-of-time prefetch requests for the next `prefetch` frames
+            # Fire ahead-of-time prefetch requests for subsequent frames within the backlog limit
             if prefetch > 0:
+                # Prune stale futures outside the active window [n, n + backlog] (e.g. after seeking)
+                if inflight:
+                    for stale_n in list(inflight.keys()):
+                        if stale_n < n or stale_n > n + backlog:
+                            inflight.pop(stale_n, None)
+
                 for next_n in range(n + 1, min(n + prefetch + 1, info.num_frames)):
+                    if len(inflight) >= backlog:
+                        break
                     if next_n not in inflight:
                         inflight[next_n] = transport.request_frame(output_index, next_n, compression=compression)
-
-                # Prune old futures if seeking jumped far away
-                if len(inflight) > prefetch * 4:
-                    for old_n in list(inflight.keys()):
-                        if old_n < n or old_n > n + prefetch + 8:
-                            inflight.pop(old_n, None)
 
         header, plane_parts = fut.result(timeout=30.0)
 

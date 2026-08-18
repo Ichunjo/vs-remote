@@ -212,6 +212,7 @@ def pipe(
     output: int = 0,
     y4m: bool = False,
     prefetch: int = 8,
+    backlog: int | None = None,
     compression: Compression = "zstd",
     environment: Annotated[Policy | ManagedEnvironment | None, Parameter(show=False)] = None,
 ) -> None:
@@ -221,7 +222,9 @@ def pipe(
     Args:
         output: Output clip index on the remote server.
         y4m: Output standard Y4M (YUV4MPEG2) header and frame tags.
-        prefetch: Number of frames to prefetch ahead concurrently.
+        prefetch: Number of frames to prefetch ahead concurrently (0 to disable).
+        backlog: Maximum number of in-flight and prefetched frame requests buffered
+            (defaults to max(prefetch * 3, prefetch)).
         compression: Frame transport compression.
     """
     with config.create_transport(subscribe_streams=False) as transport:
@@ -233,20 +236,27 @@ def pipe(
             stdout_buf.write(_get_y4m_header(clip_info, environment))
             stdout_buf.flush()
 
+        prefetch_count = max(0, prefetch)
+        backlog_count = max(prefetch_count, backlog if backlog is not None else prefetch_count * 3)
+
         inflight = dict[int, UnifiedFuture[tuple[FrameHeader, list[bytes]]]]()
-        prefetch_count = max(1, prefetch)
 
         for n in range(clip_info.num_frames):
-            while len(inflight) < prefetch_count:
-                next_to_request = n + len(inflight)
-                if next_to_request >= clip_info.num_frames:
-                    break
-                if next_to_request not in inflight:
-                    inflight[next_to_request] = transport.request_frame(
-                        output, next_to_request, compression=compression
-                    )
+            if prefetch_count > 0:
+                while len(inflight) < backlog_count:
+                    next_to_request = n + len(inflight)
+                    if next_to_request >= clip_info.num_frames or next_to_request > n + prefetch_count:
+                        break
+                    if next_to_request not in inflight:
+                        inflight[next_to_request] = transport.request_frame(
+                            output, next_to_request, compression=compression
+                        )
+                    else:
+                        break
 
-            fut = inflight.pop(n)
+            if (fut := inflight.pop(n, None)) is None:
+                fut = transport.request_frame(output, n, compression=compression)
+
             header, plane_parts = fut.result(timeout=30.0)
 
             if header.status != StatusCode.OK:

@@ -88,13 +88,19 @@ def test_cli_subcommands(
         # Test pipe command raw without Y4M header
         raw_buf = io.BytesIO()
         monkeypatch.setattr(sys.stdout, "buffer", raw_buf)
-        pipe(client_cfg, output=0, y4m=False, prefetch=2)
+        pipe(client_cfg, output=0, y4m=False, prefetch=2, backlog=4)
 
         raw_bytes = raw_buf.getvalue()
         assert not raw_bytes.startswith(b"YUV4MPEG2")
         # 160x120 YUV420: Y=160*120=19200, U=80*60=4800, V=80*60=4800 -> 28800 bytes per frame * 3 frames = 86400 bytes
         expected_size = (160 * 120 + 80 * 60 + 80 * 60) * 3
         assert len(raw_bytes) == expected_size
+
+        # Test pipe command with prefetch=0
+        zero_buf = io.BytesIO()
+        monkeypatch.setattr(sys.stdout, "buffer", zero_buf)
+        pipe(client_cfg, output=0, y4m=False, prefetch=0)
+        assert len(zero_buf.getvalue()) == expected_size
 
 
 def test_ping_command_failure(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

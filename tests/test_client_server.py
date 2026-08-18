@@ -1134,3 +1134,40 @@ def test_is_loopback_address() -> None:
     assert _is_loopback_address("tcp://192.168.1.100:5555") is False
     assert _is_loopback_address("tcp://10.0.0.1:5555") is False
     assert _is_loopback_address("tcp://example.com:5555") is False
+
+
+@pytest.mark.vpy("initial-core")
+def test_remote_backlog_and_seeking(running_server: tuple[str, int]) -> None:
+    """Test remote VideoNode with custom prefetch, backlog, and non-linear seeking."""
+    host, port = running_server
+    address = f"tcp://{host}:{port}"
+
+    with RemoteClient(address, compression="zstd") as client:
+        # Test custom prefetch and backlog parameters
+        remote_clip = client.get_output(0, prefetch=3, backlog=6)
+
+        # Sequential access
+        assert remote_clip.get_frame(0).props["TestInt"] == 0
+        assert remote_clip.get_frame(1).props["TestInt"] == 10
+        assert remote_clip.get_frame(2).props["TestInt"] == 20
+
+        # Forward seek (triggering stale pruning)
+        assert remote_clip.get_frame(15).props["TestInt"] == 150
+        assert remote_clip.get_frame(16).props["TestInt"] == 160
+
+        # Backward seek (triggering stale pruning)
+        assert remote_clip.get_frame(5).props["TestInt"] == 50
+
+
+@pytest.mark.vpy("initial-core")
+def test_remote_zero_prefetch(running_server: tuple[str, int]) -> None:
+    """Test remote VideoNode with prefetch disabled (prefetch=0)."""
+    host, port = running_server
+    address = f"tcp://{host}:{port}"
+
+    with RemoteClient(address, compression="none") as client:
+        remote_clip = client.get_output(0, prefetch=0, backlog=0)
+        assert remote_clip.get_frame(0).props["TestInt"] == 0
+        assert remote_clip.get_frame(10).props["TestInt"] == 100
+        assert remote_clip.get_frame(19).props["TestInt"] == 190
+
