@@ -807,7 +807,7 @@ def test_source_reuse_transport(running_server: tuple[str, int]) -> None:
     host, port = running_server
     address = f"tcp://{host}:{port}"
     with ClientTransport(address) as trans:
-        clip = source(address, output=0, transport=trans)
+        clip = source(trans, output=0)
         assert clip.width == 128
         frame = clip.get_frame(0)
         assert frame.width == 128

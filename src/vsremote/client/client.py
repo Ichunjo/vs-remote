@@ -6,7 +6,7 @@ import os
 import sys
 import threading
 from logging import getLogger
-from typing import Self, TextIO, assert_never
+from typing import Self, TextIO, assert_never, overload
 
 import vapoursynth as vs
 from vsengine.futures import UnifiedFuture
@@ -193,27 +193,57 @@ class RemoteClient:
         self.transport.close()
 
 
+@overload
 def source(
     address: str = DEFAULT_ADDRESS,
+    /,
     output: int = 0,
     compression: Compression = "zstd",
+    prefetch: int = 4,
     *,
     auth_token: str | None = None,
     curve_server_key: str | bytes | None = None,
     curve_public_key: str | bytes | None = None,
     curve_secret_key: str | bytes | None = None,
-    prefetch: int = 4,
     stdout: TextIO | None = sys.stdout,
     stderr: TextIO | None = sys.stderr,
     forward_logs: bool = True,
     subscribe_streams: bool = True,
-    transport: ClientTransport | None = None,
+) -> vs.VideoNode: ...
+@overload
+def source(
+    transport: ClientTransport,
+    /,
+    output: int = 0,
+    compression: Compression = "zstd",
+    prefetch: int = 4,
+) -> vs.VideoNode: ...
+def source(
+    address_or_transport: str | ClientTransport = DEFAULT_ADDRESS,
+    output: int = 0,
+    compression: Compression = "zstd",
+    prefetch: int = 4,
+    *,
+    auth_token: str | None = None,
+    curve_server_key: str | bytes | None = None,
+    curve_public_key: str | bytes | None = None,
+    curve_secret_key: str | bytes | None = None,
+    stdout: TextIO | None = sys.stdout,
+    stderr: TextIO | None = sys.stderr,
+    forward_logs: bool = True,
+    subscribe_streams: bool = True,
 ) -> vs.VideoNode:
     """
     Connect to a remote vs-remote server and mirror a video output as a local VideoNode.
 
+    If passing an address, the client will create and start a new transport.
+    The client will be closed upon environment cleanup (registered with `vs.register_on_destroy`).
+
+    If passing an existing transport, the client will reuse the transport.
+    The transport will NOT be closed when the node is destroyed.
+
     Args:
-        address: Remote server address (e.g. "tcp://192.168.1.100:5555").
+        address_or_transport: Remote server address or existing transport.
         output: Remote output index to bind to (default 0).
         compression: Preferred plane compression (default: zstd).
         auth_token: Optional authentication token.
@@ -225,17 +255,14 @@ def source(
         stderr: Target stream or callable for remote stderr.
         forward_logs: Whether to dispatch remote LogRecords to client logging system.
         subscribe_streams: Whether to subscribe to remote streams.
-        transport: Optional existing transport to reuse.
 
     Returns:
         A vs.VideoNode that fetches frames on demand over the network.
     """
-    if transport is not None:
-        trans = transport
-    else:
+    if isinstance(address_or_transport, str):
         client = RemoteClient(
-            address=address,
-            compression=compression,
+            address_or_transport,
+            compression,
             auth_token=auth_token,
             curve_server_key=curve_server_key,
             curve_public_key=curve_public_key,
@@ -248,6 +275,8 @@ def source(
         trans = client.transport
         trans.start()
         vs.register_on_destroy(client.close)
+    else:
+        trans = address_or_transport
 
     return create_remote_vnode(transport=trans, output_index=output, compression=compression, prefetch=prefetch)
 
@@ -270,8 +299,6 @@ def create_remote_vnode(
     Returns:
         A standard vs.VideoNode proxy.
     """
-    vs.register_on_destroy(transport.close)
-
     info = transport.get_clip_info(output_index).result(timeout=30.0)
 
     blank = core.std.BlankClip(
