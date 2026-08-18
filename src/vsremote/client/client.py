@@ -247,6 +247,7 @@ def source(
         )
         trans = client.transport
         trans.start()
+        vs.register_on_destroy(client.close)
 
     return create_remote_vnode(transport=trans, output_index=output, compression=compression, prefetch=prefetch)
 
@@ -269,6 +270,8 @@ def create_remote_vnode(
     Returns:
         A standard vs.VideoNode proxy.
     """
+    vs.register_on_destroy(transport.close)
+
     info = transport.get_clip_info(output_index).result(timeout=30.0)
 
     blank = core.std.BlankClip(

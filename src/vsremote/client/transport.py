@@ -111,11 +111,17 @@ class ClientTransport:
 
             self._running = False
 
+            with self._lock:
+                for pending_fut in self._pending.values():
+                    if not pending_fut.done():
+                        pending_fut.set_exception(ConnectionResetError("Transport closed"))
+                self._pending.clear()
+
             # Cancel active coroutines in the worker loop
             if self._loop and self._loop.is_running():
                 self._loop.call_soon_threadsafe(self._cancel_tasks)
 
-            if self._thread and self._thread.is_alive():
+            if self._thread and self._thread.is_alive() and self._thread != threading.current_thread():
                 self._thread.join(timeout=1.0)
             self._thread = None
 
@@ -299,6 +305,7 @@ class ClientTransport:
         self._loop = asyncio.get_running_loop()
         self._ctx = zmq.asyncio.Context()
         self._socket = self._ctx.socket(zmq.DEALER)
+        self._socket.setsockopt(zmq.LINGER, 0)
 
         if self.curve_server_key:
             server_key_bytes = (
@@ -386,19 +393,19 @@ class ClientTransport:
         finally:
             self._ready_event.set()
 
-            if self._socket:
-                self._socket.close(linger=0)
-                self._socket = None
-
-            if self._ctx:
-                self._ctx.term()
-                self._ctx = None
-
             with self._lock:
                 for pending_fut in self._pending.values():
                     if not pending_fut.done():
                         pending_fut.set_exception(ConnectionResetError("Transport closed"))
                 self._pending.clear()
+
+            if self._socket:
+                self._socket.close(linger=0)
+                self._socket = None
+
+            if self._ctx:
+                self._ctx.destroy(linger=0)
+                self._ctx = None
 
     def _send_message(self, req_id: int, cmd: Command, payload_bytes: bytes) -> None:
         if not self._started:
