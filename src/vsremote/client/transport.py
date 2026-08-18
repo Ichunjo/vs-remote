@@ -303,9 +303,26 @@ class ClientTransport:
 
     async def _async_worker(self) -> None:
         self._loop = asyncio.get_running_loop()
-        self._ctx = zmq.asyncio.Context()
-        self._socket = self._ctx.socket(zmq.DEALER)
-        self._socket.setsockopt(zmq.LINGER, 0)
+        self._send_queue = asyncio.Queue()
+        self._ctx, self._socket = self._create_socket()
+        self._running = True
+        self._ready_event.set()
+
+        logger.debug("Client transport connected to %s", self.address)
+
+        try:
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(self._send_loop(self._socket, self._send_queue))
+                tg.create_task(self._recv_loop(self._socket))
+        except* (asyncio.CancelledError, zmq.ZMQError):
+            pass
+        finally:
+            self._cleanup_resources()
+
+    def _create_socket(self) -> tuple[zmq.asyncio.Context, zmq.asyncio.Socket]:
+        ctx = zmq.asyncio.Context()
+        socket = ctx.socket(zmq.DEALER)
+        socket.setsockopt(zmq.LINGER, 0)
 
         if self.curve_server_key:
             server_key_bytes = (
@@ -313,7 +330,7 @@ class ClientTransport:
                 if isinstance(self.curve_server_key, str)
                 else self.curve_server_key
             )
-            self._socket.setsockopt(zmq.CURVE_SERVERKEY, server_key_bytes)
+            socket.setsockopt(zmq.CURVE_SERVERKEY, server_key_bytes)
 
             if not self.curve_public_key or not self.curve_secret_key:
                 client_pub, client_sec = zmq.curve_keypair()
@@ -329,83 +346,72 @@ class ClientTransport:
                     else self.curve_secret_key
                 )
 
-            self._socket.setsockopt(zmq.CURVE_PUBLICKEY, client_pub)
-            self._socket.setsockopt(zmq.CURVE_SECRETKEY, client_sec)
+            socket.setsockopt(zmq.CURVE_PUBLICKEY, client_pub)
+            socket.setsockopt(zmq.CURVE_SECRETKEY, client_sec)
 
-        self._socket.setsockopt(zmq.SNDBUF, 8 * 1024 * 1024)
-        self._socket.setsockopt(zmq.RCVBUF, 8 * 1024 * 1024)
-        self._socket.setsockopt(zmq.SNDHWM, 1024)
-        self._socket.setsockopt(zmq.RCVHWM, 1024)
-        self._socket.connect(self.address)
+        socket.setsockopt(zmq.SNDBUF, 8 * 1024 * 1024)
+        socket.setsockopt(zmq.RCVBUF, 8 * 1024 * 1024)
+        socket.setsockopt(zmq.SNDHWM, 1024)
+        socket.setsockopt(zmq.RCVHWM, 1024)
+        socket.connect(self.address)
+        return ctx, socket
 
-        self._send_queue = asyncio.Queue()
-        self._running = True
+    async def _send_loop(self, socket: zmq.asyncio.Socket, queue: asyncio.Queue[list[bytes] | None]) -> None:
+        while self._running:
+            msg = await queue.get()
+            if msg is None or not self._running:
+                break
+            try:
+                await socket.send_multipart(msg)
+            except Exception:
+                logger.exception("Failed to send message over DEALER socket")
+
+    async def _recv_loop(self, socket: zmq.asyncio.Socket) -> None:
+        while self._running:
+            try:
+                parts = await socket.recv_multipart()
+            except (asyncio.CancelledError, zmq.ZMQError):
+                break
+            except Exception:
+                logger.exception("Error in client receiver loop")
+                break
+
+            if parts and self._running:
+                self._dispatch_response(parts)
+
+    def _dispatch_response(self, parts: list[bytes]) -> None:
+        req_id = int.from_bytes(parts[0], byteorder="big")
+
+        if req_id == 0:
+            if self.on_event and len(parts) >= 3 and parts[1] == bytes([StatusCode.OK]):
+                try:
+                    event = unpack_payload(parts[2], RemoteLogRecord | StreamOutputEvent)
+                    self.on_event(event)
+                except Exception:
+                    logger.exception("Error decoding or handling server stream event")
+            return
+
+        with self._lock:
+            fut = self._pending.pop(req_id, None)
+        if fut and not fut.done():
+            fut.set_result(parts[1:])
+
+    def _cleanup_resources(self) -> None:
         self._ready_event.set()
 
-        logger.debug("Client transport connected to %s", self.address)
+        with self._lock:
+            for pending_fut in self._pending.values():
+                if not pending_fut.done():
+                    pending_fut.set_exception(ConnectionResetError("Transport closed"))
+            self._pending.clear()
 
-        async def send_loop() -> None:
-            assert self._send_queue is not None
-            assert self._socket is not None
-            while self._running:
-                msg = await self._send_queue.get()
-                if msg is None or not self._running:
-                    break
-                try:
-                    await self._socket.send_multipart(msg)
-                except Exception:
-                    logger.exception("Failed to send message over DEALER socket")
+        if self._socket:
+            self._socket.close(linger=0)
+            self._socket = None
 
-        async def recv_loop() -> None:
-            assert self._socket is not None
-            while self._running:
-                try:
-                    parts = await self._socket.recv_multipart()
-                except (asyncio.CancelledError, zmq.ZMQError):
-                    break
-                except Exception:
-                    logger.exception("Error in client receiver loop")
-                    break
-
-                if not parts or not self._running:
-                    continue
-
-                req_id = int.from_bytes(parts[0], byteorder="big")
-
-                if req_id == 0:
-                    if self.on_event and len(parts) >= 3 and parts[1] == bytes([StatusCode.OK]):
-                        try:
-                            event = unpack_payload(parts[2], RemoteLogRecord | StreamOutputEvent)
-                            self.on_event(event)
-                        except Exception:
-                            logger.exception("Error decoding or handling server stream event")
-                    continue
-
-                with self._lock:
-                    fut = self._pending.pop(req_id, None)
-                if fut and not fut.done():
-                    fut.set_result(parts[1:])
-
-        try:
-            await asyncio.gather(send_loop(), recv_loop())
-        except asyncio.CancelledError:
-            pass
-        finally:
-            self._ready_event.set()
-
-            with self._lock:
-                for pending_fut in self._pending.values():
-                    if not pending_fut.done():
-                        pending_fut.set_exception(ConnectionResetError("Transport closed"))
-                self._pending.clear()
-
-            if self._socket:
-                self._socket.close(linger=0)
-                self._socket = None
-
-            if self._ctx:
-                self._ctx.destroy(linger=0)
-                self._ctx = None
+        if self._ctx:
+            self._ctx.destroy(linger=0)
+            self._ctx = None
 
     def _send_message(self, req_id: int, cmd: Command, payload_bytes: bytes) -> None:
         if not self._started:
