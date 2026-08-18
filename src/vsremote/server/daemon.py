@@ -112,7 +112,7 @@ class ServerDaemon:
         self._socket.setsockopt(zmq.SNDHWM, 1024)
         self._socket.setsockopt(zmq.RCVHWM, 1024)
         self._socket.bind(self.address)
-        self._executor = ThreadPoolExecutor(max_workers=self.max_workers or 4)
+        self._executor = ThreadPoolExecutor(max_workers=self.max_workers)
         self._send_lock = asyncio.Lock()
         self._running = True
 
