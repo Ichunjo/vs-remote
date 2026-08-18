@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import sys
 
 try:
     import mypy_extensions
@@ -8,7 +9,10 @@ try:
     i32 = mypy_extensions.i32
     i64 = mypy_extensions.i64
 except ImportError:
-    i32 = i64 = int
+    if sys.version_info >= (3, 14):
+        i32 = i64 = int  # type: ignore[assignment]
+    else:
+        i32 = i64 = int
 
 _PyBytes_AsString = ctypes.pythonapi.PyBytes_AsString
 _PyBytes_AsString.argtypes = [ctypes.py_object]
