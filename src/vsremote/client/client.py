@@ -74,44 +74,6 @@ class RemoteClient:
         )
         self._streams = {"stdout": self.stdout, "stderr": self.stderr}
 
-    def _handle_event(self, event: StreamEvent) -> None:
-        """Handle incoming stream chunks and structured log records from the server."""
-        match event:
-            case RemoteLogRecord():
-                record_dict = {
-                    "name": event.name,
-                    "levelno": event.levelno,
-                    "levelname": event.levelname,
-                    "msg": event.msg,
-                    "args": event.args,
-                    "filename": event.filename,
-                    "lineno": event.lineno,
-                    "funcName": event.funcName,
-                    "created": event.created,
-                    "exc_text": event.exc_text,
-                    "stack_info": event.stack_info,
-                }
-                rec = logging.makeLogRecord(record_dict)
-                setattr(rec, "_is_remote", True)
-                if self.forward_logs:
-                    logging.getLogger(rec.name).handle(rec)
-
-            case StreamOutputEvent():
-                if not (target := self._streams[event.stream]):
-                    return
-                try:
-                    target.write(event.text)
-                    target.flush()
-                except Exception:
-                    logger.exception("Error writing to client stream %s", event.stream)
-            case _:
-                assert_never(event)
-
-    def start(self) -> Self:
-        """Start client connection and background transport."""
-        self.transport.start()
-        return self
-
     def __enter__(self) -> Self:
         return self.start()
 
@@ -123,6 +85,15 @@ class RemoteClient:
 
     async def __aexit__(self, *args: object) -> None:
         self.close()
+
+    def start(self) -> Self:
+        """Start client connection and background transport."""
+        self.transport.start()
+        return self
+
+    def close(self) -> None:
+        """Close client connection and release background transport resources."""
+        self.transport.close()
 
     def ping(self) -> UnifiedFuture[bool]:
         """Check if the remote server is reachable."""
@@ -188,9 +159,37 @@ class RemoteClient:
         outputs = self.list_outputs().result(timeout=30.0)
         return {item.index: self.get_output(item.index, prefetch=prefetch) for item in outputs}
 
-    def close(self) -> None:
-        """Close client connection and release background transport resources."""
-        self.transport.close()
+    def _handle_event(self, event: StreamEvent) -> None:
+        match event:
+            case RemoteLogRecord():
+                record_dict = {
+                    "name": event.name,
+                    "levelno": event.levelno,
+                    "levelname": event.levelname,
+                    "msg": event.msg,
+                    "args": event.args,
+                    "filename": event.filename,
+                    "lineno": event.lineno,
+                    "funcName": event.funcName,
+                    "created": event.created,
+                    "exc_text": event.exc_text,
+                    "stack_info": event.stack_info,
+                }
+                rec = logging.makeLogRecord(record_dict)
+                setattr(rec, "_is_remote", True)
+                if self.forward_logs:
+                    logging.getLogger(rec.name).handle(rec)
+
+            case StreamOutputEvent():
+                if not (target := self._streams[event.stream]):
+                    return
+                try:
+                    target.write(event.text)
+                    target.flush()
+                except Exception:
+                    logger.exception("Error writing to client stream %s", event.stream)
+            case _:
+                assert_never(event)
 
 
 @overload
