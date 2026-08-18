@@ -8,7 +8,7 @@ requires = [
 build-backend = "hatchling.build"
 
 [project]
-name = "vs-remote"
+name = "vsremote"
 description = "Remote execution and frame proxy for VapourSynth"
 readme = "README.md"
 license-files = ["LICENSE"]

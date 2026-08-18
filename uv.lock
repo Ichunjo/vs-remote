@@ -847,7 +847,19 @@ wheels = [
 ]
 
 [[package]]
-name = "vs-remote"
+name = "vsjetengine"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "vapoursynth" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/56/bb/5ff3436d5e376d6f26a80ba86687e5e820ccb279175643a8c7d6486f9509/vsjetengine-1.6.0.tar.gz", hash = "sha256:0bc97430a44e5ad182296bb19e9af3b16e8095120972bef59fc0c911e9be275a", size = 50949, upload-time = "2026-08-15T15:32:51.857Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/19/44a5fdeed108096c516e80057f45e9bd5ac2f6f05e0de707ec78dfeda1aa/vsjetengine-1.6.0-py3-none-any.whl", hash = "sha256:7956f34623d2a3008b184e8dede2b4d2315786fde577528e77666c411c0e3c6b", size = 40156, upload-time = "2026-08-15T15:32:50.754Z" },
+]
+
+[[package]]
+name = "vsremote"
 source = { editable = "." }
 dependencies = [
     { name = "cyclopts" },
@@ -896,18 +908,6 @@ dev = [
     { name = "types-mypy-extensions", specifier = ">=1.1.0.20260724" },
     { name = "types-setuptools", specifier = ">=84.0.0.20260812" },
     { name = "vsstubs", specifier = ">=2.3.0" },
-]
-
-[[package]]
-name = "vsjetengine"
-version = "1.6.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "vapoursynth" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/56/bb/5ff3436d5e376d6f26a80ba86687e5e820ccb279175643a8c7d6486f9509/vsjetengine-1.6.0.tar.gz", hash = "sha256:0bc97430a44e5ad182296bb19e9af3b16e8095120972bef59fc0c911e9be275a", size = 50949, upload-time = "2026-08-15T15:32:51.857Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/10/19/44a5fdeed108096c516e80057f45e9bd5ac2f6f05e0de707ec78dfeda1aa/vsjetengine-1.6.0-py3-none-any.whl", hash = "sha256:7956f34623d2a3008b184e8dede2b4d2315786fde577528e77666c411c0e3c6b", size = 40156, upload-time = "2026-08-15T15:32:50.754Z" },
 ]
 
 [[package]]
