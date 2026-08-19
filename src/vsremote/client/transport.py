@@ -102,7 +102,15 @@ class ClientTransport:
         self.close()
 
     def start(self) -> Self:
-        """Start background worker thread (idempotent)."""
+        """
+        Start background worker thread and establish ZeroMQ connection (idempotent).
+
+        Returns:
+            The connected ClientTransport instance.
+
+        Raises:
+            RemoteTimeoutError: If the background worker thread fails to initialize within timeout (5s).
+        """
         with self._start_lock:
             if not self._started or not self._running:
                 self._start_worker_thread()
@@ -112,7 +120,7 @@ class ClientTransport:
         return self
 
     def close(self) -> None:
-        """Close socket and stop background transport thread."""
+        """Close socket, cancel pending requests, and stop background transport thread."""
         with self._start_lock:
             if not self._started or not self._running:
                 return
@@ -175,6 +183,13 @@ class ClientTransport:
 
         Returns:
             A UnifiedFuture resolving to a typed ResponseEnvelope containing status, decoded payload, and extra frames.
+
+        Raises (via Future):
+            TransportNotStartedError: If the transport has not been started.
+            TransportClosedError: If the transport is closed or closing.
+            TransportNotConnectedError: If the internal transport queue/loop is unavailable.
+            MalformedMessageError: If the server response cannot be framed.
+            UnknownStatusCodeError: If the server returns an unrecognized status code byte.
         """
         fut = UnifiedFuture[list[bytes]]()
 
@@ -203,7 +218,13 @@ class ClientTransport:
         return fut.map(to_response_envelope, cancel_cb=lambda: self._cancel_request(req_id))
 
     def ping(self) -> UnifiedFuture[bool]:
-        """Check connection liveness to the remote server."""
+        """
+        Check connection liveness to the remote server.
+
+        Returns:
+            A UnifiedFuture resolving to True if the server responded with PONG,
+            False otherwise (suppresses all errors).
+        """
         return (
             self.send_request(Command.PING)
             .map(lambda resp: resp.status == StatusCode.OK and resp.payload == b"PONG")
@@ -211,14 +232,43 @@ class ClientTransport:
         )
 
     def list_outputs(self) -> UnifiedFuture[list[OutputItem]]:
-        """List all available VideoNode outputs on the server."""
+        """
+        List all available VideoNode outputs on the server.
+
+        Returns:
+            A UnifiedFuture resolving to a list of OutputItem metadata.
+
+        Raises (via Future):
+            TransportNotStartedError: If the transport is not started.
+            TransportClosedError: If the transport is closed.
+            RemoteAuthenticationError: If authentication failed (StatusCode.UNAUTHORIZED).
+            RemoteExecutionError: If the server encountered an error querying outputs (StatusCode.ERROR).
+            RemoteError: If any other server-side error occurred.
+        """
         return self.send_request(
             Command.LIST_OUTPUTS,
             response_type=list[OutputItem],
         ).map(lambda r: r.raise_for_status("Failed to list outputs").payload)
 
     def load_script(self, script_path: str | os.PathLike[str], chdir: bool = True) -> UnifiedFuture[list[OutputItem]]:
-        """Request the remote server to load or switch to a script file."""
+        """
+        Request the remote server to load or switch to a script file.
+
+        Args:
+            script_path: Path to the script file to load.
+            chdir: Change the current working directory of the remote server to the script directory before loading.
+
+        Returns:
+            A UnifiedFuture resolving to a list of available OutputItem metadata from the loaded script.
+
+        Raises (via Future):
+            TransportNotStartedError: If the transport is not started.
+            TransportClosedError: If the transport is closed.
+            RemoteAuthenticationError: If authentication failed (StatusCode.UNAUTHORIZED).
+            RemoteExecutionError: If script evaluation or execution failed on the server (StatusCode.ERROR).
+            RemoteNotFoundError: If the script file does not exist (StatusCode.NOT_FOUND).
+            RemoteError: If any other server-side error occurred.
+        """
         return self.send_request(
             Command.LOAD_SCRIPT,
             LoadScriptRequest(os.fspath(script_path), chdir),
@@ -226,7 +276,24 @@ class ClientTransport:
         ).map(lambda r: r.raise_for_status(f"Failed to load script {script_path}").payload)
 
     def load_code(self, code: str, filename: str = "<remote_code>") -> UnifiedFuture[list[OutputItem]]:
-        """Request the remote server to execute Python/VapourSynth code."""
+        """
+        Request the remote server to execute Python/VapourSynth code dynamically.
+
+        Args:
+            code: Python code string to execute.
+            filename: Virtual filename for traceback and error reporting.
+
+        Returns:
+            A UnifiedFuture resolving to a list of available OutputItem metadata.
+
+        Raises (via Future):
+            TransportNotStartedError: If the transport is not started.
+            TransportClosedError: If the transport is closed.
+            RemoteAuthenticationError: If authentication failed (StatusCode.UNAUTHORIZED).
+            RemotePermissionError: If dynamic code evaluation is disabled on the server (StatusCode.PERMISSION_DENIED).
+            RemoteExecutionError: If code evaluation or execution failed on the server (StatusCode.ERROR).
+            RemoteError: If any other server-side error occurred.
+        """
         return self.send_request(
             Command.LOAD_CODE,
             LoadCodeRequest(code, filename),
@@ -234,7 +301,23 @@ class ClientTransport:
         ).map(lambda r: r.raise_for_status("Failed to load code").payload)
 
     def reload(self, chdir: bool = True) -> UnifiedFuture[list[OutputItem]]:
-        """Request the remote server to reload its current script file."""
+        """
+        Request the remote server to reload its current script file.
+
+        Args:
+            chdir: Change the current working directory of the remote server to the script directory before reloading.
+
+        Returns:
+            A UnifiedFuture resolving to a list of available OutputItem metadata.
+
+        Raises (via Future):
+            TransportNotStartedError: If the transport is not started.
+            TransportClosedError: If the transport is closed.
+            RemoteAuthenticationError: If authentication failed (StatusCode.UNAUTHORIZED).
+            RemoteExecutionError: If reloading the script failed on the server (StatusCode.ERROR).
+            RemoteNotFoundError: If no active script is loaded on the server (StatusCode.NOT_FOUND).
+            RemoteError: If any other server-side error occurred.
+        """
         return self.send_request(
             Command.RELOAD,
             ReloadRequest(chdir=chdir),
@@ -242,7 +325,23 @@ class ClientTransport:
         ).map(lambda r: r.raise_for_status("Failed to reload script").payload)
 
     def get_clip_info(self, output_index: int = 0) -> UnifiedFuture[ClipInfo]:
-        """Fetch static metadata for the specified output index."""
+        """
+        Fetch static metadata for the specified output index.
+
+        Args:
+            output_index: Output clip index on the server.
+
+        Returns:
+            A UnifiedFuture resolving to ClipInfo metadata.
+
+        Raises (via Future):
+            TransportNotStartedError: If the transport is not started.
+            TransportClosedError: If the transport is closed.
+            RemoteAuthenticationError: If authentication failed (StatusCode.UNAUTHORIZED).
+            RemoteNotFoundError: If the output index was not found on the server (StatusCode.NOT_FOUND).
+            RemoteExecutionError: If the server failed to inspect the output clip (StatusCode.ERROR).
+            RemoteError: If any other server-side error occurred.
+        """
         return self.send_request(
             Command.GET_CLIP_INFO,
             OutputIndexRequest(output_index),
@@ -264,7 +363,14 @@ class ClientTransport:
             compression: Preferred plane compression (zstd or none).
 
         Returns:
-            UnifiedFuture resolving to (FrameHeader, list of plane byte buffers).
+            A UnifiedFuture resolving to (FrameHeader, list of plane byte buffers).
+            Note: If the remote frame render failed, the returned FrameHeader will contain
+            status != StatusCode.OK and header.error_message containing the error string.
+
+        Raises (via Future):
+            TransportNotStartedError: If the transport is not started.
+            TransportClosedError: If the transport is closed.
+            MalformedMessageError: If the server response cannot be decoded.
         """
         req_payload = FrameRequest(output_index=output_index, n=n, compression=compression)
 
@@ -275,7 +381,15 @@ class ClientTransport:
         return self.send_request(Command.GET_FRAME, req_payload).map(parse_frame_response)
 
     def subscribe_stream(self, replay_history: bool = True) -> UnifiedFuture[bool]:
-        """Subscribe to log records and stream events from the remote server."""
+        """
+        Subscribe to log records and stream events from the remote server.
+
+        Args:
+            replay_history: Whether to replay historical log records upon subscribing.
+
+        Returns:
+            A UnifiedFuture resolving to True on successful subscription, False on failure (suppresses all errors).
+        """
         req_payload = StreamSubscribeRequest(replay_history=replay_history)
         return (
             self.send_request(Command.SUBSCRIBE_STREAM, req_payload)
@@ -284,7 +398,12 @@ class ClientTransport:
         )
 
     def unsubscribe_stream(self) -> UnifiedFuture[bool]:
-        """Unsubscribe from log records and stream events."""
+        """
+        Unsubscribe from log records and stream events.
+
+        Returns:
+            A UnifiedFuture resolving to True on successful unsubscription, False on failure (suppresses all errors).
+        """
         return (
             self.send_request(Command.UNSUBSCRIBE_STREAM)
             .map(lambda r: r.status == StatusCode.OK)

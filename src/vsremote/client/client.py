@@ -87,7 +87,15 @@ class RemoteClient:
         self.close()
 
     def start(self) -> Self:
-        """Start client connection and background transport."""
+        """
+        Start client connection and background transport.
+
+        Returns:
+            The started RemoteClient instance.
+
+        Raises:
+            RemoteTimeoutError: If the background transport worker thread fails to initialize within timeout.
+        """
         self.transport.start()
         return self
 
@@ -96,11 +104,28 @@ class RemoteClient:
         self.transport.close()
 
     def ping(self) -> UnifiedFuture[bool]:
-        """Check if the remote server is reachable."""
+        """
+        Check if the remote server is reachable.
+
+        Returns:
+            A UnifiedFuture resolving to True if reachable, False otherwise (suppresses errors).
+        """
         return self.transport.ping()
 
     def list_outputs(self) -> UnifiedFuture[list[OutputItem]]:
-        """Query all available output clips from the remote server."""
+        """
+        Query all available output clips from the remote server.
+
+        Returns:
+            A UnifiedFuture resolving to a list of OutputItem metadata.
+
+        Raises (via Future):
+            TransportNotStartedError: If the transport is not started.
+            TransportClosedError: If the transport is closed.
+            RemoteAuthenticationError: If authentication failed (StatusCode.UNAUTHORIZED).
+            RemoteExecutionError: If querying outputs failed on the server (StatusCode.ERROR).
+            RemoteError: If any other server-side error occurred.
+        """
         return self.transport.list_outputs()
 
     def load_script(self, script_path: str | os.PathLike[str], chdir: bool = True) -> UnifiedFuture[list[OutputItem]]:
@@ -112,7 +137,15 @@ class RemoteClient:
             chdir: Change the current working directory of the remote server to the script directory before loading.
 
         Returns:
-            A future that resolves to a list of output clips.
+            A UnifiedFuture resolving to a list of output clips.
+
+        Raises (via Future):
+            TransportNotStartedError: If the transport is not started.
+            TransportClosedError: If the transport is closed.
+            RemoteAuthenticationError: If authentication failed (StatusCode.UNAUTHORIZED).
+            RemoteExecutionError: If script loading or execution failed on the server (StatusCode.ERROR).
+            RemoteNotFoundError: If the script file does not exist (StatusCode.NOT_FOUND).
+            RemoteError: If any other server-side error occurred.
         """
         return self.transport.load_script(script_path, chdir=chdir)
 
@@ -125,7 +158,15 @@ class RemoteClient:
             filename: The filename to use for the code.
 
         Returns:
-            A future that resolves to a list of output clips.
+            A UnifiedFuture resolving to a list of output clips.
+
+        Raises (via Future):
+            TransportNotStartedError: If the transport is not started.
+            TransportClosedError: If the transport is closed.
+            RemoteAuthenticationError: If authentication failed (StatusCode.UNAUTHORIZED).
+            RemotePermissionError: If dynamic code execution is disabled on the server (StatusCode.PERMISSION_DENIED).
+            RemoteExecutionError: If code execution failed on the server (StatusCode.ERROR).
+            RemoteError: If any other server-side error occurred.
         """
         return self.transport.load_code(code, filename=filename)
 
@@ -137,7 +178,15 @@ class RemoteClient:
             chdir: Change the current working directory of the remote server to the script directory before reloading.
 
         Returns:
-            A future that resolves to a list of output clips.
+            A UnifiedFuture resolving to a list of output clips.
+
+        Raises (via Future):
+            TransportNotStartedError: If the transport is not started.
+            TransportClosedError: If the transport is closed.
+            RemoteAuthenticationError: If authentication failed (StatusCode.UNAUTHORIZED).
+            RemoteExecutionError: If script reloading failed on the server (StatusCode.ERROR).
+            RemoteNotFoundError: If no active script is loaded (StatusCode.NOT_FOUND).
+            RemoteError: If any other server-side error occurred.
         """
         return self.transport.reload(chdir=chdir)
 
@@ -149,7 +198,15 @@ class RemoteClient:
             output_index: Output index on the server.
 
         Returns:
-            A future that resolves to the clip info.
+            A UnifiedFuture resolving to the ClipInfo metadata.
+
+        Raises (via Future):
+            TransportNotStartedError: If the transport is not started.
+            TransportClosedError: If the transport is closed.
+            RemoteAuthenticationError: If authentication failed (StatusCode.UNAUTHORIZED).
+            RemoteNotFoundError: If the output index was not found on the server (StatusCode.NOT_FOUND).
+            RemoteExecutionError: If the server failed to inspect the clip (StatusCode.ERROR).
+            RemoteError: If any other server-side error occurred.
         """
         return self.transport.get_clip_info(output_index)
 
@@ -162,7 +219,12 @@ class RemoteClient:
             n: Frame number to request.
 
         Returns:
-            A future that resolves to a tuple of frame header and plane data.
+            A UnifiedFuture resolving to a tuple of (FrameHeader, list of plane byte buffers).
+
+        Raises (via Future):
+            TransportNotStartedError: If the transport is not started.
+            TransportClosedError: If the transport is closed.
+            MalformedMessageError: If the response cannot be parsed.
         """
         return self.transport.request_frame(output_index, n, compression=self.compression)
 
@@ -178,6 +240,22 @@ class RemoteClient:
 
         Returns:
             A vs.VideoNode that lazily requests and renders frames from the server.
+
+        Raises:
+            RemoteNotFoundError: If the requested output index is not found on the server.
+            RemoteAuthenticationError: If authentication failed.
+            RemoteTimeoutError: If the initial clip info handshake times out (30s).
+            TransportNotStartedError: If the transport has not been started.
+            TransportClosedError: If the transport is closed.
+            UnsupportedFormatError: If the remote clip has variable format or an unsupported layout.
+            vs.Error: If local BlankClip creation fails.
+
+        Raises (during frame rendering):
+            RemoteExecutionError: If frame rendering failed on the remote server.
+            RemoteNotFoundError: If the remote output clip was closed or removed.
+            RemoteAuthenticationError: If session authentication is rejected.
+            RemoteTimeoutError: If frame retrieval times out (30s).
+            TransportClosedError: If the transport connection was severed during frame retrieval.
         """
         return create_remote_vnode(
             transport=self.transport,
@@ -198,6 +276,14 @@ class RemoteClient:
 
         Returns:
             A dictionary mapping output index to its corresponding vs.VideoNode proxy.
+
+        Raises:
+            RemoteAuthenticationError: If authentication failed.
+            RemoteExecutionError: If the server encountered an error listing outputs.
+            RemoteTimeoutError: If listing outputs or fetching clip info times out (30s).
+            TransportNotStartedError: If the transport is not started.
+            TransportClosedError: If the transport is closed.
+            UnsupportedFormatError: If an output clip has variable format or an unsupported layout.
         """
         outputs = self.list_outputs().result(timeout=30.0)
         return {item.index: self.get_output(item.index, prefetch=prefetch, backlog=backlog) for item in outputs}
@@ -305,6 +391,21 @@ def source(
 
     Returns:
         A vs.VideoNode that fetches frames on demand over the network.
+
+    Raises:
+        RemoteNotFoundError: If the requested output index is not found on the server.
+        RemoteAuthenticationError: If authentication failed.
+        RemoteTimeoutError: If transport initialization or initial clip info handshake times out.
+        TransportClosedError: If the transport connection fails or is closed.
+        UnsupportedFormatError: If the remote clip has variable format or an unsupported layout.
+        vs.Error: If local BlankClip creation fails.
+
+    Raises (during frame rendering):
+        RemoteExecutionError: If frame rendering failed on the remote server.
+        RemoteNotFoundError: If the remote output clip was closed or removed.
+        RemoteAuthenticationError: If session authentication is rejected.
+        RemoteTimeoutError: If frame retrieval times out (30s).
+        TransportClosedError: If the transport connection was severed during frame retrieval.
     """
     if isinstance(address_or_transport, str):
         client = RemoteClient(
@@ -354,6 +455,22 @@ def create_remote_vnode(
 
     Returns:
         A standard vs.VideoNode proxy.
+
+    Raises:
+        RemoteNotFoundError: If the requested output index is not found on the server.
+        RemoteAuthenticationError: If authentication failed.
+        RemoteTimeoutError: If the initial clip info handshake times out (30s).
+        TransportNotStartedError: If the transport has not been started.
+        TransportClosedError: If the transport is closed.
+        UnsupportedFormatError: If the remote clip has variable format or an unsupported layout.
+        vs.Error: If local BlankClip creation fails.
+
+    Raises (during frame rendering):
+        RemoteExecutionError: If frame rendering failed on the remote server.
+        RemoteNotFoundError: If the remote output clip was closed or removed.
+        RemoteAuthenticationError: If session authentication is rejected.
+        RemoteTimeoutError: If frame retrieval times out (30s).
+        TransportClosedError: If the transport connection was severed during frame retrieval.
     """
     info = transport.get_clip_info(output_index).result(timeout=30.0)
 
