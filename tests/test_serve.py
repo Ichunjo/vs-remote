@@ -95,6 +95,9 @@ def test_serve_cli_command_dispatch(port: int, tmp_path: Path) -> None:
             "--curve",
             "--curve-secret-key",
             "curve_sec_key_123",
+            "--curve-allowed-keys",
+            "key1",
+            "key2",
         ]
     )
 
@@ -107,6 +110,15 @@ def test_serve_cli_command_dispatch(port: int, tmp_path: Path) -> None:
     assert bound.arguments["auth_token"] == "test_secret_token"
     assert bound.arguments["curve"] is True
     assert bound.arguments["curve_secret_key"] == "curve_sec_key_123"
+    assert bound.arguments["curve_allowed_keys"] == ["key1", "key2"]
+
+
+def test_serve_cli_curve_allowed_keys_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test parsing curve_allowed_keys from environment variable."""
+    monkeypatch.setenv("VSREMOTE_CURVE_ALLOWED_KEYS", "key_alpha key_beta")
+    func, bound, _ = app.parse_args(["serve"])
+    assert func == serve
+    assert bound.arguments["curve_allowed_keys"] == ["key_alpha", "key_beta"]
 
 
 def test_keygen_cli_command() -> None:

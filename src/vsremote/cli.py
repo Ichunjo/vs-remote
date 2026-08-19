@@ -7,6 +7,7 @@ import signal
 import sys
 import threading
 import time
+from collections.abc import Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Annotated, override
@@ -90,6 +91,10 @@ def serve(
     curve: bool = False,
     curve_secret_key: Annotated[str | None, Parameter(env_var="VSREMOTE_CURVE_SECRET_KEY")] = None,
     curve_public_key: Annotated[str | None, Parameter(env_var="VSREMOTE_CURVE_PUBLIC_KEY")] = None,
+    curve_allowed_keys: Annotated[
+        Sequence[str] | None,
+        Parameter(env_var="VSREMOTE_CURVE_ALLOWED_KEYS", consume_multiple=True),
+    ] = None,
     # Not exposed to the CLI
     ready_event: Annotated[threading.Event | None, Parameter(show=False)] = None,
     stop_event: Annotated[threading.Event | None, Parameter(show=False)] = None,
@@ -108,6 +113,7 @@ def serve(
         curve: Automatically generate an ephemeral CurveZMQ keypair for this session.
         curve_secret_key: Optional CurveZMQ server secret key for end-to-end encryption.
         curve_public_key: Optional CurveZMQ server public key.
+        curve_allowed_keys: Optional sequence of authorized CurveZMQ client public keys.
     """
     if curve and not curve_secret_key:
         pub, sec = zmq.curve_keypair()
@@ -131,6 +137,7 @@ def serve(
             auth_token=auth_token,
             curve_secret_key=curve_secret_key,
             curve_public_key=curve_public_key,
+            curve_allowed_keys=curve_allowed_keys,
         )
 
         async def run() -> None:
@@ -284,9 +291,23 @@ def keygen() -> None:
     console.print("[bold green]Generated CurveZMQ Keypair:[/bold green]\n")
     console.print(f"  [bold]Public Key:[/bold]  [cyan]{pub_str}[/cyan]")
     console.print(f"  [bold]Secret Key:[/bold]  [yellow]{sec_str}[/yellow]\n")
-    console.print("[bold dim]Usage:[/bold dim]")
+
+    console.print("[bold dim]Usage (Server Encryption):[/bold dim]")
     console.print(f'  Server:  vsremote serve script.vpy --curve-secret-key "{sec_str}"')
     console.print(f'  Client:  vsremote.source("tcp://...", curve_server_key="{pub_str}")\n')
+
+    console.print("[bold dim]Usage (Client Authentication):[/bold dim]")
+    console.print(
+        f'  Server:  vsremote serve script.vpy --curve-secret-key "<SERVER_SEC>" --curve-allowed-keys "{pub_str}"'
+    )
+    console.print(
+        f'  Client:  vsremote.source("tcp://...", curve_server_key="<SERVER_PUB>", '
+        f'curve_public_key="{pub_str}", curve_secret_key="{sec_str}")'
+    )
+    console.print(
+        f'  CLI:     vsremote pipe --curve-server-key "<SERVER_PUB>" '
+        f'--curve-public-key "{pub_str}" --curve-secret-key "{sec_str}"\n'
+    )
 
 
 @app.meta.default

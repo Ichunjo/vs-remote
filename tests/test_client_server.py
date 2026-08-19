@@ -907,6 +907,131 @@ def test_curvezmq_explicit_keys_connected(server: ServerFactory, test_clip: vs.V
 
 
 @pytest.mark.vpy("initial-core")
+def test_curvezmq_client_auth_whitelisted(server: ServerFactory, test_clip: vs.VideoNode) -> None:
+    server_public, server_secret = zmq.curve_keypair()
+    client_public, client_secret = zmq.curve_keypair()
+
+    with (
+        server(
+            [test_clip],
+            curve_secret_key=server_secret,
+            curve_public_key=server_public,
+            curve_allowed_keys=[client_public],
+        ) as (host, port),
+        RemoteClient(
+            f"tcp://{host}:{port}",
+            curve_server_key=server_public,
+            curve_public_key=client_public,
+            curve_secret_key=client_secret,
+        ) as client,
+    ):
+        assert client.ping().result() is True
+        outputs = client.list_outputs().result()
+        assert len(outputs) == 1
+
+
+@pytest.mark.vpy("initial-core")
+def test_curvezmq_client_auth_rejected_unauthorized(server: ServerFactory, test_clip: vs.VideoNode) -> None:
+    server_public, server_secret = zmq.curve_keypair()
+    allowed_public, _ = zmq.curve_keypair()
+    unauthorized_public, unauthorized_secret = zmq.curve_keypair()
+
+    with (
+        server(
+            [test_clip],
+            curve_secret_key=server_secret,
+            curve_public_key=server_public,
+            curve_allowed_keys=[allowed_public],
+        ) as (host, port),
+        RemoteClient(
+            f"tcp://{host}:{port}",
+            curve_server_key=server_public,
+            curve_public_key=unauthorized_public,
+            curve_secret_key=unauthorized_secret,
+        ) as client,
+        pytest.raises(TimeoutError),
+    ):
+        # Unauthorized client handshake is rejected by server ZAP handler, leading to timeout
+        client.ping().result(timeout=0.5)
+
+
+@pytest.mark.vpy("initial-core")
+def test_curvezmq_client_auth_multiple_keys(server: ServerFactory, test_clip: vs.VideoNode) -> None:
+    server_public, server_secret = zmq.curve_keypair()
+    c1_pub, c1_sec = zmq.curve_keypair()
+    c2_pub, c2_sec = zmq.curve_keypair()
+    c3_pub, c3_sec = zmq.curve_keypair()
+
+    with (
+        server(
+            [test_clip],
+            curve_secret_key=server_secret,
+            curve_public_key=server_public,
+            curve_allowed_keys=[c1_pub, c2_pub.decode("ascii")],
+        ) as (host, port),
+        RemoteClient(
+            f"tcp://{host}:{port}",
+            curve_server_key=server_public,
+            curve_public_key=c1_pub,
+            curve_secret_key=c1_sec,
+        ) as client1,
+        RemoteClient(
+            f"tcp://{host}:{port}",
+            curve_server_key=server_public,
+            curve_public_key=c2_pub,
+            curve_secret_key=c2_sec,
+        ) as client2,
+        RemoteClient(
+            f"tcp://{host}:{port}",
+            curve_server_key=server_public,
+            curve_public_key=c3_pub,
+            curve_secret_key=c3_sec,
+        ) as client3,
+    ):
+        assert client1.ping().result() is True
+        assert client2.ping().result() is True
+        with pytest.raises(TimeoutError):
+            client3.ping().result(timeout=0.5)
+
+
+def test_curvezmq_invalid_key_length_raises() -> None:
+    pub, sec = zmq.curve_keypair()
+
+    with pytest.raises(ValueError, match="Invalid Curve key length"):
+        ServerDaemon(ScriptRunner(), curve_secret_key=sec, curve_allowed_keys=["short_key"])
+
+    with pytest.raises(ValueError, match="Invalid Curve key length"):
+        ServerDaemon(ScriptRunner(), curve_secret_key=sec, curve_allowed_keys=[b"short_bytes"])
+
+    with pytest.raises(ValueError, match="Invalid curve_secret_key length"):
+        ServerDaemon(ScriptRunner(), curve_secret_key="short")
+
+    with pytest.raises(ValueError, match="Invalid curve_public_key length"):
+        ServerDaemon(ScriptRunner(), curve_secret_key=sec, curve_public_key="short")
+
+    # Corrupted Z85 string (40 chars with invalid Z85 characters)
+    with pytest.raises(ValueError, match="Invalid Z85 Curve key"):
+        ServerDaemon(ScriptRunner(), curve_secret_key=sec, curve_allowed_keys=["%" * 40])
+
+    # Missing dependent curve parameters on server
+    with pytest.raises(ValueError, match="curve_allowed_keys requires curve_secret_key"):
+        ServerDaemon(ScriptRunner(), curve_allowed_keys=[pub])
+
+    with pytest.raises(ValueError, match="curve_public_key requires curve_secret_key"):
+        ServerDaemon(ScriptRunner(), curve_public_key=pub)
+
+    # Missing dependent curve parameters on client transport
+    with pytest.raises(ValueError, match="must both be specified"):
+        ClientTransport(curve_server_key=pub, curve_public_key=pub)
+
+    with pytest.raises(ValueError, match="must both be specified"):
+        ClientTransport(curve_server_key=pub, curve_secret_key=sec)
+
+    with pytest.raises(ValueError, match="require curve_server_key"):
+        ClientTransport(curve_public_key=pub, curve_secret_key=sec)
+
+
+@pytest.mark.vpy("initial-core")
 def test_transport_reload_failure_handling(server: ServerFactory, test_clip: vs.VideoNode) -> None:
     # Server with runner that has no script file -> reload fails
     with (

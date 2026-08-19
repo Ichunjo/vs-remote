@@ -41,6 +41,7 @@ from ..protocol import (
     StreamSubscribeRequest,
     pack_payload,
     unpack_payload,
+    validate_curve_key,
 )
 
 logger = getLogger(__name__)
@@ -60,17 +61,6 @@ class ClientTransport:
         on_event: Callable[[StreamEvent], None] | None = None,
         subscribe_streams: bool = True,
     ) -> None:
-        if not address.startswith(("tcp://", "ipc://", "inproc://")):
-            address = f"tcp://{address}"
-
-        self.address = address
-        self.auth_token = auth_token
-        self.curve_server_key = curve_server_key
-        self.curve_public_key = curve_public_key
-        self.curve_secret_key = curve_secret_key
-        self.on_event = on_event
-        self.subscribe_streams = subscribe_streams
-
         self._ctx: zmq.asyncio.Context | None = None
         self._socket: zmq.asyncio.Socket | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -85,6 +75,23 @@ class ClientTransport:
         self._running = False
         self._start_lock = threading.Lock()
         self._started = False
+
+        if (curve_public_key is None) != (curve_secret_key is None):
+            raise ValueError("curve_public_key and curve_secret_key must both be specified for client authentication")
+
+        if (curve_public_key or curve_secret_key) and not curve_server_key:
+            raise ValueError("curve_public_key and curve_secret_key require curve_server_key to be specified")
+
+        if not address.startswith(("tcp://", "ipc://", "inproc://")):
+            address = f"tcp://{address}"
+
+        self.address = address
+        self.auth_token = auth_token
+        self.curve_server_key = validate_curve_key(curve_server_key, "curve_server_key")
+        self.curve_public_key = validate_curve_key(curve_public_key, "curve_public_key")
+        self.curve_secret_key = validate_curve_key(curve_secret_key, "curve_secret_key")
+        self.on_event = on_event
+        self.subscribe_streams = subscribe_streams
 
     def __enter__(self) -> Self:
         return self.start()
@@ -448,26 +455,13 @@ class ClientTransport:
         socket.setsockopt(zmq.LINGER, 0)
 
         if self.curve_server_key:
-            server_key_bytes = (
-                self.curve_server_key.encode("ascii")
-                if isinstance(self.curve_server_key, str)
-                else self.curve_server_key
-            )
-            socket.setsockopt(zmq.CURVE_SERVERKEY, server_key_bytes)
+            socket.setsockopt(zmq.CURVE_SERVERKEY, self.curve_server_key)
 
             if not self.curve_public_key or not self.curve_secret_key:
                 client_pub, client_sec = zmq.curve_keypair()
             else:
-                client_pub = (
-                    self.curve_public_key.encode("ascii")
-                    if isinstance(self.curve_public_key, str)
-                    else self.curve_public_key
-                )
-                client_sec = (
-                    self.curve_secret_key.encode("ascii")
-                    if isinstance(self.curve_secret_key, str)
-                    else self.curve_secret_key
-                )
+                client_pub = self.curve_public_key
+                client_sec = self.curve_secret_key
 
             socket.setsockopt(zmq.CURVE_PUBLICKEY, client_pub)
             socket.setsockopt(zmq.CURVE_SECRETKEY, client_sec)

@@ -79,13 +79,13 @@ vsremote pipe tcp://192.168.1.100:5555 --output 0 | ffmpeg -i - -c:v libx264 out
 
 ## CLI Reference
 
-| Command  | Description                                           | Example                                                                               |
-| :------- | :---------------------------------------------------- | :------------------------------------------------------------------------------------ |
-| `serve`  | Host a `.vpy` script or execution server              | `vsremote serve script.vpy --address tcp://127.0.0.1:5555`                            |
-| `ping`   | Test connection and measure round-trip latency        | `vsremote ping tcp://192.168.1.100:5555`                                              |
-| `info`   | Display metadata for all outputs on the remote server | `vsremote info tcp://192.168.1.100:5555`                                              |
-| `pipe`   | Stream frames directly to stdout as Y4M or raw planes | `vsremote pipe tcp://192.168.1.100:5555 --y4m --output 0 \| x265 --y4m - -o out.hevc` |
-| `keygen` | Generate a Curve25519 keypair for CurveZMQ encryption | `vsremote keygen`                                                                     |
+| Command  | Description                                                         | Example                                                                               |
+| :------- | :------------------------------------------------------------------ | :------------------------------------------------------------------------------------ |
+| `serve`  | Host a `.vpy` script or execution server                            | `vsremote serve script.vpy --address tcp://127.0.0.1:5555`                            |
+| `ping`   | Test connection and measure round-trip latency                      | `vsremote ping tcp://192.168.1.100:5555`                                              |
+| `info`   | Display metadata for all outputs on the remote server               | `vsremote info tcp://192.168.1.100:5555`                                              |
+| `pipe`   | Stream frames directly to stdout as Y4M or raw planes               | `vsremote pipe tcp://192.168.1.100:5555 --y4m --output 0 \| x265 --y4m - -o out.hevc` |
+| `keygen` | Generate a Curve25519 keypair for CurveZMQ encryption & client auth | `vsremote keygen`                                                                     |
 
 ---
 
@@ -106,7 +106,9 @@ clip = vsremote.source(
     compression="zstd",  # "zstd" or "none"
     prefetch=4,  # Frames to asynchronously prefetch ahead
     auth_token=None,  # Optional authentication token
-    curve_server_key=None,  # Optional CurveZMQ public key
+    curve_server_key=None,  # Optional CurveZMQ server public key
+    curve_public_key=None,  # Optional CurveZMQ client public key
+    curve_secret_key=None,  # Optional CurveZMQ client secret key
     forward_logs=True,  # Stream remote logs to local logging
 )
 ```
@@ -187,14 +189,24 @@ VapourSynth scripts are Python code. Evaluating untrusted `.vpy` scripts or enab
     vsremote info --address tcp://127.0.0.1:5555
     ```
 
-- **Direct LAN**: Enable CurveZMQ (Curve25519) encryption and pre-shared token authentication:
+- **Direct LAN (Encryption Only)**: Enable CurveZMQ (Curve25519) encryption and optional pre-shared token authentication:
 
     ```bash
-    # Server
-    vsremote serve script.vpy --address tcp://192.168.1.100:5555 --curve --auth-token "secret"
+    # Server (generate ephemeral keypair or provide static secret key)
+    vsremote serve script.vpy --address tcp://192.168.1.100:5555 --curve-secret-key "<SERVER_SECRET>" --auth-token "secret"
 
     # Client
-    vsremote info --address tcp://192.168.1.100:5555 --curve-server-key "<SERVER_PUBLIC_KEY>" --auth-token "secret"
+    vsremote info tcp://192.168.1.100:5555 --curve-server-key "<SERVER_PUBLIC>" --auth-token "secret"
+    ```
+
+- **Direct LAN (Mutual Authentication & Whitelisting)**: Whitelist authorized client public keys on the server:
+
+    ```bash
+    # Server (whitelist allowed client public keys)
+    vsremote serve script.vpy --address tcp://192.168.1.100:5555 --curve-secret-key "<SERVER_SECRET>" --curve-allowed-keys "<CLIENT_PUBLIC>"
+
+    # Client (connect with client keypair)
+    vsremote info tcp://192.168.1.100:5555 --curve-server-key "<SERVER_PUBLIC>" --curve-public-key "<CLIENT_PUBLIC>" --curve-secret-key "<CLIENT_SECRET>"
     ```
 
 - **Untrusted Scripts/Code**: Run `vsremote` in a rootless container with read-only mounts and dropped capabilities.

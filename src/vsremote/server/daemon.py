@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import ipaddress
 import logging
 import secrets
@@ -13,6 +14,7 @@ from logging import getLogger
 from typing import Any
 
 import vapoursynth as vs
+import zmq
 import zmq.asyncio
 
 from ..exceptions import TransportClosedError
@@ -35,12 +37,22 @@ from ..protocol import (
     pack_payload,
     sanitize_props,
     unpack_payload,
+    validate_curve_allowed_keys,
+    validate_curve_key,
+    z85_encode,
 )
 from ..utils import ensure_vsengine_loop
 from .redirect import LogForwarder, StreamRedirector
 from .runner import ScriptRunner
 
 logger = getLogger(__name__)
+
+_ZAP_STATUS_OK = b"200"
+_ZAP_MSG_OK = b"OK"
+_ZAP_USER_AUTH = b"authorized_client"
+_ZAP_EMPTY = b""
+_ZAP_STATUS_ERR = b"400"
+_ZAP_MSG_UNAUTHORIZED = b"Unauthorized client key"
 
 
 class ServerDaemon:
@@ -57,21 +69,12 @@ class ServerDaemon:
         auth_token: str | None = None,
         curve_secret_key: str | bytes | None = None,
         curve_public_key: str | bytes | None = None,
+        curve_allowed_keys: Sequence[str | bytes] | None = None,
     ) -> None:
-        self.runner = runner
-        if not address.startswith(("tcp://", "ipc://", "inproc://")):
-            address = f"tcp://{address}"
-        self.address = address
-
-        self.compression: Compression = compression
-        self.max_workers = max_workers
-        self.allow_eval = allow_eval
-        self.auth_token = auth_token
-        self.curve_secret_key = curve_secret_key
-        self.curve_public_key = curve_public_key
-
         self._ctx: zmq.asyncio.Context | None = None
         self._socket: zmq.asyncio.Socket | None = None
+        self._zap_socket: zmq.asyncio.Socket | None = None
+        self._zap_task: asyncio.Task[None] | None = None
         self._executor: ThreadPoolExecutor | None = None
         self._running = False
         self._send_lock: asyncio.Lock | None = None
@@ -84,6 +87,25 @@ class ServerDaemon:
         self._stdout_redirector: StreamRedirector | None = None
         self._stderr_redirector: StreamRedirector | None = None
 
+        if curve_public_key is not None and curve_secret_key is None:
+            raise ValueError("curve_public_key requires curve_secret_key to be specified on the server")
+
+        if curve_allowed_keys is not None and curve_secret_key is None:
+            raise ValueError("curve_allowed_keys requires curve_secret_key to be specified on the server")
+
+        if not address.startswith(("tcp://", "ipc://", "inproc://")):
+            address = f"tcp://{address}"
+
+        self.runner = runner
+        self.address = address
+        self.compression: Compression = compression
+        self.max_workers = max_workers
+        self.allow_eval = allow_eval
+        self.auth_token = auth_token
+        self.curve_secret_key = validate_curve_key(curve_secret_key, "curve_secret_key")
+        self.curve_public_key = validate_curve_key(curve_public_key, "curve_public_key")
+        self.curve_allowed_keys = validate_curve_allowed_keys(curve_allowed_keys)
+
     async def start(self, ready_event: threading.Event | asyncio.Event | None = None) -> None:
         """Start the async server loop."""
         loop = asyncio.get_running_loop()
@@ -91,23 +113,23 @@ class ServerDaemon:
         self._loop = loop
 
         self._ctx = zmq.asyncio.Context()
+
+        if self.curve_secret_key and self.curve_allowed_keys:
+            self._zap_socket = self._ctx.socket(zmq.REP)
+            self._zap_socket.setsockopt(zmq.LINGER, 0)
+            self._zap_socket.bind("inproc://zeromq.zap.01")
+            self._zap_task = asyncio.create_task(self._zap_handler_loop(), name="VSRemoteZAP")
+
         self._socket = self._ctx.socket(zmq.ROUTER)
 
         if self.curve_secret_key:
             self._socket.setsockopt(zmq.CURVE_SERVER, 1)
-            sec_bytes = (
-                self.curve_secret_key.encode("ascii")
-                if isinstance(self.curve_secret_key, str)
-                else self.curve_secret_key
-            )
-            self._socket.setsockopt(zmq.CURVE_SECRETKEY, sec_bytes)
+            self._socket.setsockopt(zmq.CURVE_SECRETKEY, self.curve_secret_key)
             if self.curve_public_key:
-                pub_bytes = (
-                    self.curve_public_key.encode("ascii")
-                    if isinstance(self.curve_public_key, str)
-                    else self.curve_public_key
-                )
-                self._socket.setsockopt(zmq.CURVE_PUBLICKEY, pub_bytes)
+                self._socket.setsockopt(zmq.CURVE_PUBLICKEY, self.curve_public_key)
+
+            if self.curve_allowed_keys:
+                self._socket.setsockopt(zmq.ZAP_DOMAIN, b"vsremote")
 
         self._socket.setsockopt(zmq.SNDBUF, 8 * 1024 * 1024)
         self._socket.setsockopt(zmq.RCVBUF, 8 * 1024 * 1024)
@@ -128,12 +150,13 @@ class ServerDaemon:
         self._stderr_redirector.install()
 
         logger.info(
-            "Server started on %s (default compression: %s, allow_eval: %s, auth: %s, curve: %s)",
+            "Server started on %s (default compression: %s, allow_eval: %s, auth: %s, curve: %s, client_auth: %s)",
             self.address,
             self.compression,
             self.allow_eval,
             bool(self.auth_token),
             bool(self.curve_secret_key),
+            bool(self.curve_allowed_keys),
         )
 
         if not _is_loopback_address(self.address):
@@ -219,6 +242,16 @@ class ServerDaemon:
             await asyncio.gather(*self._active_tasks, return_exceptions=True)
             self._active_tasks.clear()
 
+        if self._zap_task:
+            self._zap_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, zmq.ZMQError):
+                await self._zap_task
+            self._zap_task = None
+
+        if self._zap_socket:
+            self._zap_socket.close(linger=0)
+            self._zap_socket = None
+
         if self._socket:
             self._socket.close(linger=0)
             self._socket = None
@@ -233,6 +266,59 @@ class ServerDaemon:
 
         self.runner.close()
         logger.info("Server shutdown complete")
+
+    async def _zap_handler_loop(self) -> None:
+        """Handle ZeroMQ Authentication Protocol (ZAP) requests to whitelist Curve client keys."""
+        if not self._zap_socket:
+            return
+
+        while self._running:
+            try:
+                msg = await self._zap_socket.recv_multipart()
+            except (asyncio.CancelledError, zmq.ZMQError):
+                break
+
+            version = msg[0] if len(msg) >= 1 else b"1.0"
+            req_id = msg[1] if len(msg) >= 2 else b"0"
+
+            try:
+                if len(msg) < 7:
+                    await self._zap_socket.send_multipart(
+                        [version, req_id, _ZAP_STATUS_ERR, b"Invalid ZAP request", _ZAP_EMPTY, _ZAP_EMPTY]
+                    )
+                    continue
+
+                _, address, _, mechanism, client_key = msg[2:7]
+                addr_str = address.decode("utf-8", errors="replace")
+
+                if mechanism == b"CURVE" and client_key in self.curve_allowed_keys:
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "ZAP: Authorized CURVE client %s (key: %s)",
+                            addr_str,
+                            z85_encode(client_key).decode("ascii"),
+                        )
+                    await self._zap_socket.send_multipart(
+                        [version, req_id, _ZAP_STATUS_OK, _ZAP_MSG_OK, _ZAP_USER_AUTH, _ZAP_EMPTY]
+                    )
+                else:
+                    logger.warning(
+                        "ZAP: Unauthorized %s client connection from %s (key %s not in allowed keys)",
+                        mechanism.decode("ascii", errors="replace"),
+                        addr_str,
+                        z85_encode(client_key).decode("ascii", errors="replace"),
+                    )
+                    await self._zap_socket.send_multipart(
+                        [version, req_id, _ZAP_STATUS_ERR, _ZAP_MSG_UNAUTHORIZED, _ZAP_EMPTY, _ZAP_EMPTY]
+                    )
+            except (asyncio.CancelledError, zmq.ZMQError):
+                break
+            except Exception as exc:
+                logger.error("Error handling ZAP authentication request: %s", exc)
+                with contextlib.suppress(Exception):
+                    await self._zap_socket.send_multipart(
+                        [version, req_id, _ZAP_STATUS_ERR, b"Internal authentication error", _ZAP_EMPTY, _ZAP_EMPTY]
+                    )
 
     async def _handle_request(self, msg: list[bytes]) -> None:
         """Process an incoming ROUTER message and dispatch response."""
