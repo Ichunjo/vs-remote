@@ -4,6 +4,7 @@ import asyncio
 import io
 import logging
 import sys
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -1171,3 +1172,47 @@ def test_remote_zero_prefetch(running_server: tuple[str, int]) -> None:
         assert remote_clip.get_frame(10).props["TestInt"] == 100
         assert remote_clip.get_frame(19).props["TestInt"] == 190
 
+
+@pytest.mark.vpy("initial-core")
+def test_client_future_cancellation(running_server: tuple[str, int]) -> None:
+    """Test that cancelling a frame request future marks it cancelled and sends CANCEL_REQUEST."""
+    host, port = running_server
+    address = f"tcp://{host}:{port}"
+
+    with ClientTransport(address) as trans:
+        fut = trans.request_frame(0, 5)
+        # Cancel future immediately
+        assert fut.cancel() is True
+        assert fut.cancelled() is True
+
+        # Subsequent requests still work cleanly
+        fut2 = trans.request_frame(0, 6)
+        header, _ = fut2.result(timeout=5.0)
+        assert header.status == StatusCode.OK
+        assert header.n == 6
+
+
+@pytest.mark.vpy("initial-core")
+def test_server_cancel_in_flight_task(server: ServerFactory) -> None:
+    """Test that server cleanly cancels an in-flight slow task without crashing."""
+
+    clip = core.std.BlankClip(width=64, height=64, length=10)
+
+    def slow_filter(n: int, f: vs.VideoFrame) -> vs.VideoFrame:
+        if n == 3:
+            time.sleep(0.3)
+        return f
+
+    slow_clip = clip.std.ModifyFrame(clip, slow_filter)
+
+    with server([slow_clip]) as (host, port), ClientTransport(f"tcp://{host}:{port}") as trans:
+        # Request slow frame and cancel it mid-evaluation
+        slow_fut = trans.request_frame(0, 3)
+        time.sleep(0.05)
+        assert slow_fut.cancel() is True
+
+        # Ensure server is still healthy and responds to subsequent requests
+        normal_fut = trans.request_frame(0, 0)
+        header, _ = normal_fut.result(timeout=5.0)
+        assert header.status == StatusCode.OK
+        assert header.n == 0

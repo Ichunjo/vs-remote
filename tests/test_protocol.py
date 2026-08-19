@@ -13,6 +13,7 @@ from vsremote.exceptions import (
     UnsupportedFormatError,
 )
 from vsremote.protocol import (
+    CancelRequest,
     ClipInfo,
     Command,
     FrameHeader,
@@ -261,3 +262,8 @@ def test_stream_events_serialization() -> None:
     packed_sub = pack_payload(sub_req)
     unpacked_sub = unpack_payload(packed_sub, StreamSubscribeRequest)
     assert unpacked_sub.replay_history is True
+
+    cancel_req = CancelRequest(request_id=42)
+    packed_cancel = pack_payload(cancel_req)
+    unpacked_cancel = unpack_payload(packed_cancel, CancelRequest)
+    assert unpacked_cancel.request_id == 42

@@ -18,6 +18,7 @@ import zmq.asyncio
 from ..exceptions import TransportClosedError
 from ..protocol import (
     DEFAULT_ADDRESS,
+    CancelRequest,
     Command,
     Compression,
     FrameHeader,
@@ -75,6 +76,7 @@ class ServerDaemon:
         self._running = False
         self._send_lock: asyncio.Lock | None = None
         self._active_tasks = set[asyncio.Task[None]]()
+        self._inflight_tasks = dict[tuple[bytes, int], asyncio.Task[None]]()
         self._subscribers = set[bytes]()
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -258,7 +260,25 @@ class ServerDaemon:
             )
             return
 
+        key = req.identity, req.request_id
+        if (current_task := asyncio.current_task()) is not None:
+            self._inflight_tasks[key] = current_task
+
+        try:
+            await self._dispatch_request(req)
+        finally:
+            self._inflight_tasks.pop(key, None)
+
+    async def _dispatch_request(self, req: RequestEnvelope) -> None:
         match req.command:
+            case Command.CANCEL_REQUEST:
+                try:
+                    cancel_payload = unpack_payload(req.payload_bytes, CancelRequest)
+                    if task := self._inflight_tasks.get((req.identity, cancel_payload.request_id)):
+                        task.cancel()
+                except Exception as e:
+                    logger.debug("Failed to cancel request: %s", e)
+
             case Command.PING:
                 await self._send_reply(req, StatusCode.OK, b"PONG")
 
@@ -417,6 +437,9 @@ class ServerDaemon:
                 # Stream response back to client
                 await self._send_reply(req, StatusCode.OK, pack_payload(header), planes)
 
+        except asyncio.CancelledError:
+            logger.debug("Frame request %d for output %d was cancelled", n, output_index)
+            raise
         except Exception as e:
             logger.exception("Failed to render frame %d for output %d", n, output_index)
             tb = traceback.format_exc()

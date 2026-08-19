@@ -271,3 +271,9 @@ class LoadScriptRequest(msgspec.Struct, frozen=True):
 
     script_path: str
     chdir: bool = True
+
+
+class CancelRequest(msgspec.Struct, frozen=True):
+    """Request payload to cancel an in-flight server task by request ID."""
+
+    request_id: int

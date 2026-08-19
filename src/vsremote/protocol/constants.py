@@ -43,6 +43,7 @@ class Command(IntEnum):
     RELOAD = 8
     LOAD_CODE = 9
     LOAD_SCRIPT = 10
+    CANCEL_REQUEST = 11
 
 
 class StatusCode(IntEnum):

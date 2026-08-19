@@ -387,8 +387,11 @@ def create_remote_vnode(
                 # Prune stale futures outside the active window [n, n + backlog] (e.g. after seeking)
                 if inflight:
                     for stale_n in list(inflight.keys()):
-                        if stale_n < n or stale_n > n + backlog:
-                            inflight.pop(stale_n, None)
+                        if (
+                            (stale_n < n or stale_n > n + backlog)  # no fmt
+                            and (stale_fut := inflight.pop(stale_n, None)) is not None
+                        ):
+                            stale_fut.cancel()
 
                 for next_n in range(n + 1, min(n + prefetch + 1, info.num_frames)):
                     if len(inflight) >= backlog:

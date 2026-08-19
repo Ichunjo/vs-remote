@@ -12,6 +12,7 @@ from .constants import (
     StatusCodeError,
 )
 from .messages import (
+    CancelRequest,
     ClipInfo,
     FrameHeader,
     FrameRequest,
@@ -34,6 +35,7 @@ __all__ = [
     "DEFAULT_HOST",
     "DEFAULT_PORT",
     "PROTOCOL_VERSION",
+    "CancelRequest",
     "ClipInfo",
     "Command",
     "Compression",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import threading
 from collections.abc import Callable
@@ -12,9 +13,16 @@ import zmq.asyncio
 from typing_extensions import TypeForm
 from vsengine.futures import UnifiedFuture
 
-from ..exceptions import RemoteTimeoutError, TransportClosedError, TransportNotConnectedError, TransportNotStartedError
+from ..exceptions import (
+    RemoteTimeoutError,
+    TransportClosedError,
+    TransportError,
+    TransportNotConnectedError,
+    TransportNotStartedError,
+)
 from ..protocol import (
     DEFAULT_ADDRESS,
+    CancelRequest,
     ClipInfo,
     Command,
     Compression,
@@ -192,7 +200,7 @@ class ClientTransport:
                 self._pending.pop(req_id, None)
             fut.set_exception(exc)
 
-        return fut.map(to_response_envelope)
+        return fut.map(to_response_envelope, cancel_cb=lambda: self._cancel_request(req_id))
 
     def ping(self) -> UnifiedFuture[bool]:
         """Check connection liveness to the remote server."""
@@ -211,7 +219,6 @@ class ClientTransport:
 
     def load_script(self, script_path: str | os.PathLike[str], chdir: bool = True) -> UnifiedFuture[list[OutputItem]]:
         """Request the remote server to load or switch to a script file."""
-
         return self.send_request(
             Command.LOAD_SCRIPT,
             LoadScriptRequest(os.fspath(script_path), chdir),
@@ -220,7 +227,6 @@ class ClientTransport:
 
     def load_code(self, code: str, filename: str = "<remote_code>") -> UnifiedFuture[list[OutputItem]]:
         """Request the remote server to execute Python/VapourSynth code."""
-
         return self.send_request(
             Command.LOAD_CODE,
             LoadCodeRequest(code, filename),
@@ -229,7 +235,6 @@ class ClientTransport:
 
     def reload(self, chdir: bool = True) -> UnifiedFuture[list[OutputItem]]:
         """Request the remote server to reload its current script file."""
-
         return self.send_request(
             Command.RELOAD,
             ReloadRequest(chdir=chdir),
@@ -238,7 +243,6 @@ class ClientTransport:
 
     def get_clip_info(self, output_index: int = 0) -> UnifiedFuture[ClipInfo]:
         """Fetch static metadata for the specified output index."""
-
         return self.send_request(
             Command.GET_CLIP_INFO,
             OutputIndexRequest(output_index),
@@ -427,3 +431,14 @@ class ClientTransport:
             self._loop.call_soon_threadsafe(self._send_queue.put_nowait, parts)
         except RuntimeError:
             raise TransportClosedError("ClientTransport is closed")
+
+    def _cancel_request(self, req_id: int) -> None:
+        with self._lock:
+            fut = self._pending.pop(req_id, None)
+        if fut and not fut.done():
+            fut.cancel()
+
+        if self._running and self._loop and self._send_queue is not None:
+            cancel_payload = pack_payload(CancelRequest(request_id=req_id))
+            with contextlib.suppress(TransportError, RuntimeError):
+                self._send_message(0, Command.CANCEL_REQUEST, cancel_payload)
