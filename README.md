@@ -19,13 +19,13 @@ It mirrors remote clips as local `VideoNode` proxies, streaming frames on demand
 ## Installation
 
 ```bash
-uv add vs-remote
+uv add vsremote
 ```
 
 Or with `pip`:
 
 ```bash
-pip install vs-remote
+pip install vsremote
 ```
 
 ---
