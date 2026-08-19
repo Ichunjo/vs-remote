@@ -326,20 +326,19 @@ class ServerDaemon:
                     "Failed to reload script",
                 )
 
-            case Command.LOAD_CODE:
-                if self.allow_eval:
-                    await self._dispatch_executor(
-                        req,
-                        LoadCodeRequest,
-                        lambda p: self.runner.load_code(p.code, filename=p.filename),
-                        "Failed to load code",
-                    )
-                else:
-                    await self._send_reply_error(
-                        req,
-                        StatusCode.PERMISSION_DENIED,
-                        "Dynamic code evaluation is disabled on this server (allow_eval=False)",
-                    )
+            case Command.LOAD_CODE if self.allow_eval:
+                await self._dispatch_executor(
+                    req,
+                    LoadCodeRequest,
+                    lambda p: self.runner.load_code(p.code, filename=p.filename),
+                    "Failed to load code",
+                )
+            case Command.LOAD_CODE if not self.allow_eval:
+                await self._send_reply_error(
+                    req,
+                    StatusCode.PERMISSION_DENIED,
+                    "Dynamic code evaluation is disabled on this server (allow_eval=False)",
+                )
 
             case Command.LOAD_SCRIPT:
                 if self.allow_eval:
@@ -355,10 +354,8 @@ class ServerDaemon:
                         StatusCode.PERMISSION_DENIED,
                         "Dynamic script loading is disabled on this server (allow_eval=False)",
                     )
-                    return
 
     async def _handle_get_frame(self, req: RequestEnvelope) -> None:
-        """Handle async frame rendering and compression."""
         if not self._socket:
             return
 
@@ -424,18 +421,18 @@ class ServerDaemon:
                     self._executor, _extract_and_compress_planes, frame, compression_str
                 )
 
-                header = FrameHeader(
-                    status=StatusCode.OK,
-                    request_id=request_id,
-                    n=n,
-                    output_index=output_index,
-                    compression=compression_str,
-                    plane_sizes=[p.nbytes if isinstance(p, memoryview) else len(p) for p in planes],
-                    props=clean_props,
-                )
+            header = FrameHeader(
+                status=StatusCode.OK,
+                request_id=request_id,
+                n=n,
+                output_index=output_index,
+                compression=compression_str,
+                plane_sizes=[p.nbytes if isinstance(p, memoryview) else len(p) for p in planes],
+                props=clean_props,
+            )
 
-                # Stream response back to client
-                await self._send_reply(req, StatusCode.OK, pack_payload(header), planes)
+            # Stream response back to client
+            await self._send_reply(req, StatusCode.OK, pack_payload(header), planes)
 
         except asyncio.CancelledError:
             logger.debug("Frame request %d for output %d was cancelled", n, output_index)
