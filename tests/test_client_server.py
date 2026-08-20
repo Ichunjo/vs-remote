@@ -74,7 +74,7 @@ def test_list_outputs(running_server: tuple[str, int]) -> None:
         assert outputs[1].info.num_frames == 10
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_factories=["stdlib"])
 @pytest.mark.vpy("initial-core")
 async def test_async_client_operations(running_server: tuple[str, int]) -> None:
     host, port = running_server
@@ -311,7 +311,7 @@ def test_client_transport_context_manager(running_server: tuple[str, int]) -> No
         assert len(outputs) == 2
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_factories=["stdlib"])
 @pytest.mark.vpy("initial-core")
 async def test_client_transport_async_context_manager(running_server: tuple[str, int]) -> None:
     """Verify ClientTransport works as an asynchronous context manager."""
