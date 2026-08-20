@@ -47,6 +47,7 @@ class RemoteClient:
         stderr: TextIO | None = sys.stderr,
         forward_logs: bool = True,
         subscribe_streams: bool = True,
+        replay_history: bool = True,
     ) -> None:
         ensure_vsengine_loop()
 
@@ -63,6 +64,7 @@ class RemoteClient:
         self.stderr = stderr
         self.forward_logs = forward_logs
         self.subscribe_streams = subscribe_streams
+        self.replay_history = replay_history
         self.transport = ClientTransport(
             address,
             auth_token=self.auth_token,
@@ -71,6 +73,7 @@ class RemoteClient:
             curve_secret_key=curve_secret_key,
             on_event=self._handle_event,
             subscribe_streams=subscribe_streams,
+            replay_history=replay_history,
         )
         self._streams = {"stdout": self.stdout, "stderr": self.stderr}
 
@@ -338,6 +341,7 @@ def source(
     stderr: TextIO | None = sys.stderr,
     forward_logs: bool = True,
     subscribe_streams: bool = True,
+    replay_history: bool = True,
 ) -> vs.VideoNode: ...
 @overload
 def source(
@@ -363,6 +367,7 @@ def source(
     stderr: TextIO | None = sys.stderr,
     forward_logs: bool = True,
     subscribe_streams: bool = True,
+    replay_history: bool = True,
 ) -> vs.VideoNode:
     """
     Connect to a remote vs-remote server and mirror a video output as a local VideoNode.
@@ -388,6 +393,7 @@ def source(
         stderr: Target stream or callable for remote stderr.
         forward_logs: Whether to dispatch remote LogRecords to client logging system.
         subscribe_streams: Whether to subscribe to remote streams.
+        replay_history: Whether to replay historical startup logs upon subscribing.
 
     Returns:
         A vs.VideoNode that fetches frames on demand over the network.
@@ -419,6 +425,7 @@ def source(
             stderr=stderr,
             forward_logs=forward_logs,
             subscribe_streams=subscribe_streams,
+            replay_history=replay_history,
         )
         trans = client.transport
         trans.start()

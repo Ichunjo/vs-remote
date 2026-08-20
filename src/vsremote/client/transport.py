@@ -60,6 +60,7 @@ class ClientTransport:
         curve_secret_key: str | bytes | None = None,
         on_event: Callable[[StreamEvent], None] | None = None,
         subscribe_streams: bool = True,
+        replay_history: bool = True,
     ) -> None:
         self._ctx: zmq.asyncio.Context | None = None
         self._socket: zmq.asyncio.Socket | None = None
@@ -92,6 +93,7 @@ class ClientTransport:
         self.curve_secret_key = validate_curve_key(curve_secret_key, "curve_secret_key")
         self.on_event = on_event
         self.subscribe_streams = subscribe_streams
+        self.replay_history = replay_history
 
     def __enter__(self) -> Self:
         return self.start()
@@ -123,7 +125,7 @@ class ClientTransport:
                 self._start_worker_thread()
                 self._started = True
                 if self.subscribe_streams:
-                    self.subscribe_stream(replay_history=True)
+                    self.subscribe_stream(replay_history=self.replay_history)
         return self
 
     def close(self) -> None:

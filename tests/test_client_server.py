@@ -431,6 +431,36 @@ async def test_stream_vapoursynth_log_message(server: ServerFactory, tmp_path: P
 
 @pytest.mark.asyncio(loop_factories=["custom"])
 @pytest.mark.vpy("no-policy")
+async def test_stream_replay_history_disabled(server: ServerFactory, tmp_path: Path) -> None:
+    """Verify replay_history=False suppresses replaying startup events from previously loaded scripts."""
+    script_file = tmp_path / "test_replay_history.vpy"
+    script_file.write_text(
+        "import logging\n"
+        "import vapoursynth as vs\n"
+        "core = vs.core\n"
+        "clip = core.std.BlankClip(width=64, height=64, length=2)\n"
+        "clip.set_output(0)\n"
+        "logging.getLogger('test_replay_logger').warning('Startup warning to ignore')\n",
+        encoding="utf-8",
+    )
+
+    async with server(script_file, compression="zstd") as (host, port):
+        collector = LogCollector()
+        target_logger = logging.getLogger("test_replay_logger")
+        target_logger.addHandler(collector)
+        try:
+            async with RemoteClient(f"tcp://{host}:{port}", replay_history=False) as client:
+                assert (await client.ping()) is True
+                await asyncio.sleep(0.1)
+
+            matching = [r for r in collector.records if r.name == "test_replay_logger"]
+            assert len(matching) == 0
+        finally:
+            target_logger.removeHandler(collector)
+
+
+@pytest.mark.asyncio(loop_factories=["custom"])
+@pytest.mark.vpy("no-policy")
 async def test_stream_stdout_and_stderr(server: ServerFactory, tmp_path: Path) -> None:
     """Verify direct print() and sys.stderr.write() from script are streamed to client buffers."""
     script_file = tmp_path / "test_streams.vpy"
