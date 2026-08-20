@@ -537,9 +537,11 @@ class ServerDaemon:
         except ExecutionError as e:
             logger.debug("%s: %s", error_context, e)
             await self._send_error(req, StatusCode.ERROR, _build_error_payload(e))
+            await asyncio.get_running_loop().run_in_executor(self._executor, self.runner.teardown_environment)
         except Exception as e:
             logger.exception(error_context)
             await self._send_error(req, StatusCode.ERROR, _build_error_payload(e))
+            await asyncio.get_running_loop().run_in_executor(self._executor, self.runner.teardown_environment)
 
     async def _send_reply(
         self,

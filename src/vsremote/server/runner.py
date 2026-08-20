@@ -95,7 +95,7 @@ class ScriptRunner:
             if not path.is_file():
                 raise FileNotFoundError(f"Script not found: {path}")
 
-            self._teardown_environment()
+            self.teardown_environment()
             self._script_path = path
             self._chdir = chdir
 
@@ -131,7 +131,7 @@ class ScriptRunner:
             List of OutputItem describing available video outputs.
         """
         with self._rlock:
-            self._teardown_environment()
+            self.teardown_environment()
             self._script_path = None
 
             env = self._ensure_policy(environment)
@@ -185,10 +185,26 @@ class ScriptRunner:
         with self._rlock:
             return list(self._output_items)
 
+    def teardown_environment(self) -> None:
+        self._clips.clear()
+        self._clip_infos.clear()
+        self._output_items.clear()
+        self._startup_events.clear()
+
+        if self._script:
+            self._script.dispose()
+            self._script = None
+
+        if isinstance(self._environment, ManagedEnvironment):
+            self._environment.dispose()
+
+        self._environment = None
+        gc_collect()
+
     def close(self) -> None:
         """Clean up the environment and release VapourSynth resources."""
         with self._rlock:
-            self._teardown_environment()
+            self.teardown_environment()
 
             if self._policy and self._registered_policy:
                 if self._policy.is_registered:
@@ -259,22 +275,6 @@ class ScriptRunner:
             return self._policy
 
         return None
-
-    def _teardown_environment(self) -> None:
-        self._clips.clear()
-        self._clip_infos.clear()
-        self._output_items.clear()
-        self._startup_events.clear()
-
-        if self._script:
-            self._script.dispose()
-            self._script = None
-
-        if isinstance(self._environment, ManagedEnvironment):
-            self._environment.dispose()
-
-        self._environment = None
-        gc_collect()
 
     def _extract_outputs(self) -> list[OutputItem]:
         if not self._script:
