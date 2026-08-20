@@ -10,7 +10,7 @@ from vsremote import (
     RemotePayloadError,
     RemotePermissionError,
 )
-from vsremote.protocol import ResponseEnvelope, StatusCode
+from vsremote.protocol import RemoteErrorPayload, ResponseEnvelope, StackFrame, StatusCode
 
 
 def test_status_code_exception_association() -> None:
@@ -59,3 +59,47 @@ def test_response_envelope_raise_for_status() -> None:
     assert "Failed to load script: SyntaxError on line 5" in str(exc_info.value)
     assert exc_info.value.status == StatusCode.ERROR
     assert exc_info.value.payload == "SyntaxError on line 5"
+
+
+def test_remote_error_structured_payload() -> None:
+    payload = RemoteErrorPayload(
+        error="SyntaxError: invalid syntax",
+        exc_type="SyntaxError",
+        exc_msg="invalid syntax",
+        filename="/path/to/script.vpy",
+        lineno=42,
+        code_line="invalid code",
+        formatted_traceback='  File "/path/to/script.vpy", line 42\n    invalid code\nSyntaxError: invalid syntax\n',
+        frames=[StackFrame(filename="/path/to/script.vpy", lineno=42, func_name="<module>", code="invalid code")],
+    )
+
+    err = RemoteExecutionError("Failed: invalid syntax", status=StatusCode.ERROR, payload=payload)
+    assert err.exc_type == "SyntaxError"
+    assert err.exc_msg == "invalid syntax"
+    assert err.filename == "/path/to/script.vpy"
+    assert err.lineno == 42
+    assert err.code_line == "invalid code"
+    assert err.formatted_traceback is not None
+    assert "SyntaxError: invalid syntax" in err.formatted_traceback
+    assert len(err.frames) == 1
+    assert err.frames[0].code == "invalid code"
+
+    # Fallback to dict payload
+    dict_err = RemoteExecutionError(
+        "Failed",
+        status=StatusCode.ERROR,
+        payload={
+            "exc_type": "ValueError",
+            "exc_msg": "bad value",
+            "filename": "test.py",
+            "lineno": 10,
+            "code_line": "raise ValueError('bad value')",
+            "formatted_traceback": "Traceback...",
+        },
+    )
+    assert dict_err.exc_type == "ValueError"
+    assert dict_err.exc_msg == "bad value"
+    assert dict_err.filename == "test.py"
+    assert dict_err.lineno == 10
+    assert dict_err.code_line == "raise ValueError('bad value')"
+    assert dict_err.formatted_traceback == "Traceback..."

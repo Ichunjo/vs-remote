@@ -11,7 +11,7 @@ import urllib.parse
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from logging import getLogger
-from typing import Any
+from typing import Any, overload
 
 import vapoursynth as vs
 import zmq
@@ -30,7 +30,9 @@ from ..protocol import (
     LoadScriptRequest,
     OutputIndexRequest,
     ReloadRequest,
+    RemoteErrorPayload,
     RequestEnvelope,
+    StackFrame,
     StatusCode,
     StreamEvent,
     StreamSubscribeRequest,
@@ -324,28 +326,22 @@ class ServerDaemon:
     async def _handle_request(self, msg: list[bytes]) -> None:
         """Process an incoming ROUTER message and dispatch response."""
         if not self._socket:
-            return
+            return None
 
         try:
             req = RequestEnvelope.from_frames(msg)
         except ValueError as err:
             logger.warning("Received malformed message: %s", err)
             if len(msg) >= 2:
-                await self._send_error(msg[0], msg[1], StatusCode.INVALID_COMMAND, str(err))
-            return
+                await self._send_error(RequestEnvelope.from_data(msg[0], msg[1]), StatusCode.INVALID_COMMAND, str(err))
+            return None
 
         # Check auth token if authentication is enabled
         if self.auth_token is not None and (
             not req.auth_token or not secrets.compare_digest(req.auth_token, self.auth_token)
         ):
             logger.warning("Unauthorized request from identity %r (invalid or missing auth token)", req.identity)
-            await self._send_error(
-                req.identity,
-                req.request_id_bytes,
-                StatusCode.UNAUTHORIZED,
-                "Unauthorized: invalid or missing auth token",
-            )
-            return
+            return await self._send_error(req, StatusCode.UNAUTHORIZED, "Unauthorized: invalid or missing auth token")
 
         key = req.identity, req.request_id
         if (current_task := asyncio.current_task()) is not None:
@@ -379,9 +375,9 @@ class ServerDaemon:
                     info = self.runner.get_clip_info(payload.output_index)
                     await self._send_reply(req, StatusCode.OK, pack_payload(info))
                 except KeyError as e:
-                    await self._send_reply_error(req, StatusCode.NOT_FOUND, str(e))
+                    await self._send_error(req, StatusCode.NOT_FOUND, str(e))
                 except Exception as e:
-                    await self._send_reply_error(req, StatusCode.INVALID_PAYLOAD, f"Invalid OutputIndexRequest: {e}")
+                    await self._send_error(req, StatusCode.INVALID_PAYLOAD, f"Invalid OutputIndexRequest: {e}")
 
             case Command.GET_FRAME:
                 await self._handle_get_frame(req)
@@ -421,30 +417,29 @@ class ServerDaemon:
                     "Failed to load code",
                 )
             case Command.LOAD_CODE if not self.allow_eval:
-                await self._send_reply_error(
+                await self._send_error(
                     req,
                     StatusCode.PERMISSION_DENIED,
                     "Dynamic code evaluation is disabled on this server (allow_eval=False)",
                 )
 
-            case Command.LOAD_SCRIPT:
-                if self.allow_eval:
-                    await self._dispatch_executor(
-                        req,
-                        LoadScriptRequest,
-                        lambda p: self.runner.load_script(p.script_path, chdir=p.chdir),
-                        "Failed to load script",
-                    )
-                else:
-                    await self._send_reply_error(
-                        req,
-                        StatusCode.PERMISSION_DENIED,
-                        "Dynamic script loading is disabled on this server (allow_eval=False)",
-                    )
+            case Command.LOAD_SCRIPT if self.allow_eval:
+                await self._dispatch_executor(
+                    req,
+                    LoadScriptRequest,
+                    lambda p: self.runner.load_script(p.script_path, chdir=p.chdir),
+                    "Failed to load script",
+                )
+            case Command.LOAD_SCRIPT if not self.allow_eval:
+                await self._send_error(
+                    req,
+                    StatusCode.PERMISSION_DENIED,
+                    "Dynamic script loading is disabled on this server (allow_eval=False)",
+                )
 
     async def _handle_get_frame(self, req: RequestEnvelope) -> None:
         if not self._socket:
-            return
+            return None
 
         request_id = req.request_id
 
@@ -461,8 +456,7 @@ class ServerDaemon:
                 props={},
                 error_message=f"Failed to decode frame request payload: {e}",
             )
-            await self._send_reply(req, header.status, pack_payload(header))
-            return
+            return await self._send_reply(req, header.status, pack_payload(header))
 
         output_index = frame_req.output_index
         n = frame_req.n
@@ -481,22 +475,7 @@ class ServerDaemon:
                 props={},
                 error_message=str(e),
             )
-            await self._send_reply(req, header.status, pack_payload(header))
-            return
-
-        if n < 0 or n >= clip.num_frames:
-            header = FrameHeader(
-                status=StatusCode.ERROR,
-                request_id=request_id,
-                n=n,
-                output_index=output_index,
-                compression=compression_str,
-                plane_sizes=[],
-                props={},
-                error_message=f"Frame index out of bounds: {n} (num_frames: {clip.num_frames})",
-            )
-            await self._send_reply(req, header.status, pack_payload(header))
-            return
+            return await self._send_reply(req, header.status, pack_payload(header))
 
         try:
             with self.runner.environment.use():
@@ -550,20 +529,17 @@ class ServerDaemon:
         try:
             payload = unpack_payload(req.payload_bytes, payload_type)
         except Exception as e:
-            await self._send_reply_error(req, StatusCode.INVALID_PAYLOAD, f"Invalid {payload_type.__name__}: {e}")
-            return
+            return await self._send_error(req, StatusCode.INVALID_PAYLOAD, f"Invalid {payload_type.__name__}: {e}")
 
         try:
-            outputs = await asyncio.get_running_loop().run_in_executor(self._executor, lambda: action(payload))
+            outputs = await asyncio.get_running_loop().run_in_executor(self._executor, action, payload)
             await self._send_reply(req, StatusCode.OK, pack_payload(outputs))
         except ExecutionError as e:
             logger.debug("%s: %s", error_context, e)
-            await self._send_reply_error(req, StatusCode.ERROR, str(e))
+            await self._send_error(req, StatusCode.ERROR, _build_error_payload(e))
         except Exception as e:
             logger.exception(error_context)
-            tb = traceback.format_exc()
-            err_str = f"{error_context}: {e}\n\n[Remote Traceback]:\n{tb}".strip()
-            await self._send_reply_error(req, StatusCode.ERROR, err_str)
+            await self._send_error(req, StatusCode.ERROR, _build_error_payload(e))
 
     async def _send_reply(
         self,
@@ -572,23 +548,15 @@ class ServerDaemon:
         payload_bytes: bytes,
         extra_frames: Sequence[bytes | memoryview] = (),
     ) -> None:
-        await self._send_response(req.identity, req.request_id_bytes, status, payload_bytes, extra_frames)
+        await self._send_multipart([req.identity, req.request_id_bytes, bytes([status]), payload_bytes, *extra_frames])
 
-    async def _send_response(
-        self,
-        identity: bytes,
-        request_id_bytes: bytes,
-        status: StatusCode,
-        payload_bytes: bytes,
-        extra_frames: Sequence[bytes | memoryview] = (),
-    ) -> None:
-        await self._send_multipart([identity, request_id_bytes, bytes([status]), payload_bytes, *extra_frames])
-
-    async def _send_reply_error(self, req: RequestEnvelope, status: StatusCode, message: str) -> None:
-        await self._send_error(req.identity, req.request_id_bytes, status, message)
-
-    async def _send_error(self, identity: bytes, request_id_bytes: bytes, status: StatusCode, message: str) -> None:
-        await self._send_multipart([identity, request_id_bytes, bytes([status]), pack_payload({"error": message})])
+    @overload
+    async def _send_error(self, req: RequestEnvelope, status: StatusCode, message: str, /) -> None: ...
+    @overload
+    async def _send_error(self, req: RequestEnvelope, status: StatusCode, payload: RemoteErrorPayload, /) -> None: ...
+    async def _send_error(self, req: RequestEnvelope, status: StatusCode, v: str | RemoteErrorPayload, /) -> None:
+        payload = RemoteErrorPayload(v, status.name.replace("_", " ").title(), v) if isinstance(v, str) else v
+        await self._send_multipart([req.identity, req.request_id_bytes, bytes([status]), pack_payload(payload)])
 
     async def _send_multipart(self, parts: Sequence[bytes | memoryview]) -> None:
         if not self._socket or not self._send_lock:
@@ -631,3 +599,43 @@ def _is_loopback_address(address: str) -> bool:
         return ipaddress.ip_address(hostname).is_loopback
     except ValueError:
         return False
+
+
+def _build_error_payload(e: ExecutionError | Exception) -> RemoteErrorPayload:
+    orig = e.parent_error if isinstance(e, ExecutionError) else e
+
+    tb = traceback.TracebackException.from_exception(orig)
+    frames = [StackFrame.from_summary(f) for f in tb.stack if not f.filename.startswith("src/cython/")]
+
+    code_line: str | None = None
+    if isinstance(orig, SyntaxError) and orig.filename is not None:
+        filename = orig.filename
+        lineno = orig.lineno
+        code_line = orig.text.strip() if orig.text else None
+        exc_msg = orig.msg or str(orig)
+    else:
+        filename = getattr(orig, "filename", None)
+        lineno = getattr(orig, "lineno", None)
+        exc_msg = str(orig)
+
+        for f in reversed(frames):
+            norm = f.filename.lower().replace("\\", "/")
+            if not any(
+                m in norm
+                for m in ("site-packages/", "/lib/", ".venv/", "venv/", "lib/python", "vsengine/", "vsremote/")
+            ):
+                filename = f.filename
+                lineno = f.lineno
+                code_line = f.code
+                break
+
+        if lineno is None and frames:
+            filename = frames[-1].filename
+            lineno = frames[-1].lineno
+            code_line = frames[-1].code
+
+    exc_type = type(orig).__name__
+    err_str = f"{exc_type}: {exc_msg}" if exc_msg else exc_type
+    formatted_tb = "".join(tb.format())
+
+    return RemoteErrorPayload(err_str, exc_type, exc_msg, filename, lineno, code_line, formatted_tb, frames)

@@ -31,7 +31,6 @@ class RemoteTimeoutError(TransportError, TimeoutError):
     """Raised when a remote operation or handshake times out."""
 
 
-# Server Response Errors (mapped directly to StatusCode)
 class RemoteError(VSRemoteError):
     """Base exception for errors returned by the remote server."""
 
@@ -39,6 +38,53 @@ class RemoteError(VSRemoteError):
         super().__init__(message)
         self.status = status
         self.payload = payload
+
+    @property
+    def error(self) -> str:
+        """The formatted error message string."""
+        return self._payload_attribute("error", str, str(self))
+
+    @property
+    def exc_type(self) -> str:
+        """The exception class name (e.g. ValueError, SyntaxError)."""
+        return self._payload_attribute("exc_type", str, "Error")
+
+    @property
+    def exc_msg(self) -> str:
+        """The exception message string."""
+        return self._payload_attribute("exc_msg", str, "")
+
+    @property
+    def filename(self) -> str | None:
+        """The source file path where the error occurred, if known."""
+        return self._payload_attribute("filename", str, None)
+
+    @property
+    def lineno(self) -> int | None:
+        """The line number where the error occurred, if known."""
+        return self._payload_attribute("lineno", int, None)
+
+    @property
+    def code_line(self) -> str | None:
+        """The source code line where the error occurred, if known."""
+        return self._payload_attribute("code_line", str, None)
+
+    @property
+    def formatted_traceback(self) -> str | None:
+        """The formatted full traceback from the remote execution, if available."""
+        return self._payload_attribute("formatted_traceback", str, None)
+
+    @property
+    def frames(self) -> list[Any]:
+        """List of stack frames if provided by the remote server."""
+        return self._payload_attribute("frames", list[Any], list[Any]())
+
+    def _payload_attribute[T0, T1](self, name: str, t: type[T0], fallback: T1) -> T0 | T1:
+        if (val := getattr(self.payload, name, None)) is not None:
+            return val
+        if isinstance(self.payload, dict) and (val := self.payload.get(name)) is not None:
+            return val
+        return fallback
 
 
 class RemoteExecutionError(RemoteError, RuntimeError):

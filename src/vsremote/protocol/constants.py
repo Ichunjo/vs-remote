@@ -33,6 +33,7 @@ PROTOCOL_VERSION = 1
 class Command(IntEnum):
     """Protocol command identifiers."""
 
+    UNKNOWN = 0
     PING = 1
     LIST_OUTPUTS = 2
     GET_CLIP_INFO = 3

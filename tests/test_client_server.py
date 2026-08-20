@@ -194,7 +194,7 @@ def test_error_handling_out_of_bounds(running_server: tuple[str, int]) -> None:
         # Server-side invalid frame request error response
         header, _ = client.transport.request_frame(output_index=0, n=999).result()
         assert header.status == StatusCode.ERROR
-        assert "out of bounds" in header.error_message
+        assert "Invalid frame number" in header.error_message
 
         # Server-side invalid output index error
         with pytest.raises(KeyError, match="not found"):

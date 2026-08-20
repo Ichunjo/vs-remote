@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any, cast
-
 import msgspec
 import pytest
 import vapoursynth as vs
@@ -20,6 +18,7 @@ from vsremote.protocol import (
     FrameRequest,
     OutputIndexRequest,
     PlaneInfo,
+    RemoteErrorPayload,
     RemoteLogRecord,
     RequestEnvelope,
     ResponseEnvelope,
@@ -193,11 +192,12 @@ def test_response_envelope_from_frames() -> None:
     with pytest.raises(UnknownStatusCodeError, match="Unknown status code byte"):
         ResponseEnvelope.from_frames([bytes([250])])
 
-    # Error status with typed target falling back to untyped payload decoding
+    # Error status with typed target falling back to RemoteErrorPayload decoding
     err_frames = [bytes([StatusCode.ERROR]), pack_payload({"error": "Failed to load script"})]
     err_resp = ResponseEnvelope.from_frames(err_frames, ClipInfo)
     assert err_resp.status == StatusCode.ERROR
-    assert cast(dict[str, Any], err_resp.payload) == {"error": "Failed to load script"}
+    assert isinstance(err_resp.payload, RemoteErrorPayload)
+    assert err_resp.payload.error == "Failed to load script"
 
 
 def test_unpack_payload_typed_and_empty() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from logging import getLogger
+from traceback import FrameSummary
 from typing import Any, Literal, Self, overload
 
 import msgspec
@@ -17,6 +18,37 @@ type ResponseEnvelopeLike[T] = ResponseEnvelope[T]
 logger = getLogger(__name__)
 
 
+class StackFrame(msgspec.Struct, frozen=True):
+    """Structured representation of a single traceback frame."""
+
+    filename: str
+    lineno: int | None
+    func_name: str | None = None
+    code: str | None = None
+
+    @classmethod
+    def from_summary(cls, frame: FrameSummary) -> Self:
+        return cls(
+            frame.filename,
+            frame.lineno,
+            frame.name if frame.name != "<module>" else None,
+            frame.line.strip() if frame.line else None,
+        )
+
+
+class RemoteErrorPayload(msgspec.Struct, frozen=True):
+    """Structured representation of an error payload returned by the remote server."""
+
+    error: str
+    exc_type: str = "Error"
+    exc_msg: str = ""
+    filename: str | None = None
+    lineno: int | None = None
+    code_line: str | None = None
+    formatted_traceback: str | None = None
+    frames: list[StackFrame] = msgspec.field(default_factory=list)
+
+
 class ResponseEnvelope[T](msgspec.Struct, frozen=True):
     """Structured representation of a parsed ZeroMQ DEALER multipart response."""
 
@@ -30,11 +62,13 @@ class ResponseEnvelope[T](msgspec.Struct, frozen=True):
         if self.status == StatusCode.OK:
             return self
 
-        err_text = str(
-            self.payload["error"]  # nofmt
-            if isinstance(self.payload, dict) and "error" in self.payload
-            else self.payload
-        )
+        if isinstance(self.payload, RemoteErrorPayload):
+            err_text = self.payload.error
+        elif isinstance(self.payload, dict) and "error" in self.payload:
+            err_text = str(self.payload["error"])
+        else:
+            err_text = str(self.payload)
+
         msg = f"{context_msg}: {err_text}" if context_msg and not err_text.startswith(context_msg) else err_text
 
         self.status.raise_for_status(msg, payload=self.payload)
@@ -62,17 +96,18 @@ class ResponseEnvelope[T](msgspec.Struct, frozen=True):
         except ValueError as err:
             raise UnknownStatusCodeError(f"Unknown status code byte: {status_byte!r}") from err
 
-        if target_type is None or target_type is bytes:
-            payload: Any = payload_bytes
-        elif status == StatusCode.OK:
-            payload = unpack_payload(payload_bytes, target_type)
-        else:
+        payload: Any
+        if status != StatusCode.OK:
             try:
-                payload = unpack_payload(payload_bytes, target_type)
+                payload = unpack_payload(payload_bytes, RemoteErrorPayload)
             except Exception:
                 payload = unpack_payload(payload_bytes)
+        elif target_type is None or target_type is bytes:
+            payload = payload_bytes
+        else:
+            payload = unpack_payload(payload_bytes, target_type)
 
-        return cls(status=status, payload=payload, payload_bytes=payload_bytes, extra_frames=extra)
+        return cls(status, payload, payload_bytes, extra)
 
 
 class RequestEnvelope(msgspec.Struct, frozen=True):
@@ -81,10 +116,14 @@ class RequestEnvelope(msgspec.Struct, frozen=True):
     identity: bytes
     request_id_bytes: bytes
     request_id: int
-    command: Command
+    command: Command = Command.UNKNOWN
     payload_bytes: bytes = b""
     auth_token: str | None = None
     extra_frames: list[bytes] = msgspec.field(default_factory=list)
+
+    @classmethod
+    def from_data(cls, identity: bytes, request_id_bytes: bytes, command: Command = Command.UNKNOWN) -> Self:
+        return cls(identity, request_id_bytes, int.from_bytes(request_id_bytes, byteorder="big"), command)
 
     @classmethod
     def from_frames(cls, frames: list[bytes]) -> Self:
