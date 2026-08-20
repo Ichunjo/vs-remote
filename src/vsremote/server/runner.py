@@ -267,6 +267,7 @@ class ScriptRunner:
         self._clips.clear()
         self._clip_infos.clear()
         self._output_items.clear()
+        self._startup_events.clear()
 
         if self._script:
             self._script.dispose()
