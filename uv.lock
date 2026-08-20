@@ -848,14 +848,14 @@ wheels = [
 
 [[package]]
 name = "vsjetengine"
-version = "1.6.1"
+version = "1.6.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "vapoursynth" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/57/2f/8b3de9ab38a7100176e5a311d2a7ce949dd53469f5ee16ef90e369954979/vsjetengine-1.6.1.tar.gz", hash = "sha256:59556d7ffebf3fecfa84a4dd9fad4eaabf9f64f31a75bb4dd1611d60587c060b", size = 51469, upload-time = "2026-08-19T00:27:33.067Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/59/6a/4880d5151f134ff346df1893b41b8d7b6f03c5c884af1adeb49b8d7e9664/vsjetengine-1.6.2.tar.gz", hash = "sha256:05015ae2ff55d2cfda01042400126d2b8120b07e988b4ee197584034e67c6e27", size = 51472, upload-time = "2026-08-20T18:43:28.677Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ca/91/926d77e8646201ae7f0f15313a73d288176c8b7ed3a532a72b15054ec6a4/vsjetengine-1.6.1-py3-none-any.whl", hash = "sha256:71c8617fe1eb6374bfcb1e0a97cdd79a214d39f64682418ee03de8cc1944d2ab", size = 40299, upload-time = "2026-08-19T00:27:31.711Z" },
+    { url = "https://files.pythonhosted.org/packages/ce/b4/f97579be43ab9914db3c247c7307535b081217001301ee192e3048d20406/vsjetengine-1.6.2-py3-none-any.whl", hash = "sha256:abb214bb771a9dcbc266c4b6be47bdbe115f877ba723a5951913af5b3ff8dbe2", size = 40296, upload-time = "2026-08-20T18:43:27.386Z" },
 ]
 
 [[package]]
@@ -892,7 +892,7 @@ requires-dist = [
     { name = "pyzmq", specifier = ">=27.1.0" },
     { name = "rich", specifier = ">=15.0.0" },
     { name = "vapoursynth", specifier = ">=79" },
-    { name = "vsjetengine", specifier = ">=1.6.1" },
+    { name = "vsjetengine", specifier = ">=1.6.2" },
     { name = "zstandard", specifier = ">=0.25.0" },
 ]
 

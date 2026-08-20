@@ -28,7 +28,7 @@ classifiers = [
 ]
 dependencies = [
     "vapoursynth>=79",
-    "vsjetengine>=1.6.1",
+    "vsjetengine>=1.6.2",
     "pyzmq>=27.1.0",
     "zstandard>=0.25.0",
     "msgspec>=0.21.1",
