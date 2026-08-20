@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import linecache
 import os
 import threading
 from collections import deque
@@ -10,7 +11,7 @@ from typing import Self
 
 import vapoursynth as vs
 from vsengine.policy import ContextVarStore, ManagedEnvironment, Policy
-from vsengine.vpy import ExecutionError, Script, load_code, load_script
+from vsengine.vpy import Script, load_code, load_script
 
 from ..api.output import _output_metadata
 from ..exceptions import EnvironmentNotSetError, OutputNotFoundError, ScriptNotLoadedError
@@ -105,11 +106,7 @@ class ScriptRunner:
             with capture_streams(self._startup_events.append):
                 self._script = load_script(path, env, module="__vsremote__", chdir=working_dir)
                 self._environment = self._script.environment
-                try:
-                    self._script.result()
-                except ExecutionError as error:
-                    self._script.dispose()
-                    raise error from None
+                self._script.result()
 
             return self._extract_outputs()
 
@@ -139,16 +136,16 @@ class ScriptRunner:
 
             env = self._ensure_policy(environment)
             fn = filename or "<remote_code>"
+            linecache.cache[fn] = len(code), None, code.splitlines(keepends=True), fn
+            if filename:
+                norm_fn = os.path.abspath(os.path.normpath(filename))
+                linecache.cache[norm_fn] = (len(code), None, code.splitlines(keepends=True), norm_fn)
             logger.info("Loading code string (filename: %s, cwd: %s)", fn, chdir)
 
             with capture_streams(self._startup_events.append):
                 self._script = load_code(code, env, module="__vsremote__", filename=fn, chdir=chdir)
                 self._environment = self._script.environment
-                try:
-                    self._script.result()
-                except ExecutionError as error:
-                    self._script.dispose()
-                    raise error from None
+                self._script.result()
 
             return self._extract_outputs()
 
