@@ -531,17 +531,19 @@ class ServerDaemon:
         except Exception as e:
             return await self._send_error(req, StatusCode.INVALID_PAYLOAD, f"Invalid {payload_type.__name__}: {e}")
 
+        loop = asyncio.get_running_loop()
+
         try:
-            outputs = await asyncio.get_running_loop().run_in_executor(self._executor, action, payload)
+            outputs = await loop.run_in_executor(self._executor, action, payload)
             await self._send_reply(req, StatusCode.OK, pack_payload(outputs))
         except ExecutionError as e:
             logger.debug("%s: %s", error_context, e)
             await self._send_error(req, StatusCode.ERROR, _build_error_payload(e))
-            await asyncio.get_running_loop().run_in_executor(self._executor, self.runner.teardown_environment)
+            await loop.run_in_executor(self._executor, self.runner.teardown_environment)
         except Exception as e:
             logger.exception(error_context)
             await self._send_error(req, StatusCode.ERROR, _build_error_payload(e))
-            await asyncio.get_running_loop().run_in_executor(self._executor, self.runner.teardown_environment)
+            await loop.run_in_executor(self._executor, self.runner.teardown_environment)
 
     async def _send_reply(
         self,
