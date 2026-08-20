@@ -16,6 +16,7 @@ from typing import Any, overload
 import vapoursynth as vs
 import zmq
 import zmq.asyncio
+import zmq.utils.z85
 from vsengine.vpy import ExecutionError
 
 from ..exceptions import TransportClosedError
@@ -42,7 +43,6 @@ from ..protocol import (
     unpack_payload,
     validate_curve_allowed_keys,
     validate_curve_key,
-    z85_encode,
 )
 from ..utils import ensure_vsengine_loop
 from .redirect import LogForwarder, StreamRedirector
@@ -299,7 +299,7 @@ class ServerDaemon:
                         logger.debug(
                             "ZAP: Authorized CURVE client %s (key: %s)",
                             addr_str,
-                            z85_encode(client_key).decode("ascii"),
+                            zmq.utils.z85.encode(client_key).decode("ascii"),
                         )
                     await self._zap_socket.send_multipart(
                         [version, req_id, _ZAP_STATUS_OK, _ZAP_MSG_OK, _ZAP_USER_AUTH, _ZAP_EMPTY]
@@ -309,7 +309,7 @@ class ServerDaemon:
                         "ZAP: Unauthorized %s client connection from %s (key %s not in allowed keys)",
                         mechanism.decode("ascii", errors="replace"),
                         addr_str,
-                        z85_encode(client_key).decode("ascii", errors="replace"),
+                        zmq.utils.z85.encode(client_key).decode("ascii", errors="replace"),
                     )
                     await self._zap_socket.send_multipart(
                         [version, req_id, _ZAP_STATUS_ERR, _ZAP_MSG_UNAUTHORIZED, _ZAP_EMPTY, _ZAP_EMPTY]

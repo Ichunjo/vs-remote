@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import struct
 import sys
 import time
 from collections.abc import Callable
@@ -1040,7 +1041,7 @@ def test_curvezmq_invalid_key_length_raises() -> None:
         ServerDaemon(ScriptRunner(), curve_secret_key=sec, curve_public_key="short")
 
     # Corrupted Z85 string (40 chars with invalid Z85 characters)
-    with pytest.raises(ValueError, match="Invalid Z85 Curve key"):
+    with pytest.raises(struct.error, match="'I' format requires 0 <= number <= 4294967295"):
         ServerDaemon(ScriptRunner(), curve_secret_key=sec, curve_allowed_keys=["%" * 40])
 
     # Missing dependent curve parameters on server

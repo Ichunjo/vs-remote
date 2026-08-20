@@ -2,19 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-import zmq
 import zmq.utils.z85
-
-
-def z85_encode(key: bytes) -> bytes:
-    """Encode a 32-byte binary key into 40-byte Z85 ascii bytes."""
-    return zmq.utils.z85.encode(key)  # type: ignore[no-untyped-call]
-
-
-def z85_decode(key: str | bytes) -> bytes:
-    """Decode a 40-byte or 40-char Z85 key into 32-byte raw binary bytes."""
-    raw = key.encode("ascii") if isinstance(key, str) else key
-    return zmq.utils.z85.decode(raw)  # type: ignore[no-untyped-call]
 
 
 def validate_curve_key(curve_key: str | bytes | None, name: str = "curve_key") -> bytes | None:
@@ -52,15 +40,6 @@ def validate_curve_allowed_keys(curve_allowed_keys: Sequence[str | bytes] | None
             raise ValueError(
                 f"Invalid Curve key length ({len(item)} bytes). Expected 40 Z85 characters or 32 or 40 bytes."
             )
-
-        raw = item.encode("ascii") if isinstance(item, str) else item
-        if len(raw) == 40:
-            try:
-                decoded = z85_decode(raw)
-            except Exception as exc:
-                raise ValueError(f"Invalid Z85 Curve key: {item!r}") from exc
-            keys.add(decoded)
-        else:
-            keys.add(raw)
+        keys.add(zmq.utils.z85.decode(item))
 
     return keys

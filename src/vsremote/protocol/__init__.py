@@ -11,7 +11,7 @@ from .constants import (
     StatusCode,
     StatusCodeError,
 )
-from .keys import validate_curve_allowed_keys, validate_curve_key, z85_decode, z85_encode
+from .keys import validate_curve_allowed_keys, validate_curve_key
 from .messages import (
     CancelRequest,
     ClipInfo,
@@ -67,6 +67,4 @@ __all__ = [
     "unpack_payload",
     "validate_curve_allowed_keys",
     "validate_curve_key",
-    "z85_decode",
-    "z85_encode",
 ]
