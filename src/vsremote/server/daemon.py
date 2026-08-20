@@ -16,6 +16,7 @@ from typing import Any
 import vapoursynth as vs
 import zmq
 import zmq.asyncio
+from vsengine.vpy import ExecutionError
 
 from ..exceptions import TransportClosedError
 from ..protocol import (
@@ -555,6 +556,9 @@ class ServerDaemon:
         try:
             outputs = await asyncio.get_running_loop().run_in_executor(self._executor, lambda: action(payload))
             await self._send_reply(req, StatusCode.OK, pack_payload(outputs))
+        except ExecutionError as e:
+            logger.debug("%s: %s", error_context, e)
+            await self._send_reply_error(req, StatusCode.ERROR, str(e))
         except Exception as e:
             logger.exception(error_context)
             tb = traceback.format_exc()
