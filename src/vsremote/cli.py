@@ -119,7 +119,7 @@ def serve(
         pub, sec = zmq.curve_keypair()
         curve_public_key = pub.decode("ascii")
         curve_secret_key = sec.decode("ascii")
-        logger.info("CurveZMQ encryption enabled. Client public key: %s", curve_public_key)
+        logger.info("CurveZMQ encryption enabled. Server public key: %s", curve_public_key)
 
     runner = (
         ScriptRunner.from_script(script_path, environment=environment)
