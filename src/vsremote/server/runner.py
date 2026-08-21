@@ -186,19 +186,20 @@ class ScriptRunner:
             return list(self._output_items)
 
     def teardown_environment(self) -> None:
-        self._clips.clear()
-        self._clip_infos.clear()
-        self._output_items.clear()
-        self._startup_events.clear()
+        with self._rlock:
+            self._clips.clear()
+            self._clip_infos.clear()
+            self._output_items.clear()
+            self._startup_events.clear()
 
-        if self._script:
-            self._script.dispose()
-            self._script = None
+            if self._script:
+                self._script.dispose()
+                self._script = None
 
-        if isinstance(self._environment, ManagedEnvironment):
-            self._environment.dispose()
+            if isinstance(self._environment, ManagedEnvironment):
+                self._environment.dispose()
 
-        self._environment = None
+            self._environment = None
         gc_collect()
 
     def close(self) -> None:
