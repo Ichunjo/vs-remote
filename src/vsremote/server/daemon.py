@@ -538,12 +538,14 @@ class ServerDaemon:
             await self._send_reply(req, StatusCode.OK, pack_payload(outputs))
         except ExecutionError as e:
             logger.debug("%s: %s", error_context, e)
-            await self._send_error(req, StatusCode.ERROR, _build_error_payload(e))
+            payload = _build_error_payload(e)
             await loop.run_in_executor(self._executor, self.runner.teardown_environment)
+            await self._send_error(req, StatusCode.ERROR, payload)
         except Exception as e:
             logger.exception(error_context)
-            await self._send_error(req, StatusCode.ERROR, _build_error_payload(e))
+            payload = _build_error_payload(e)
             await loop.run_in_executor(self._executor, self.runner.teardown_environment)
+            await self._send_error(req, StatusCode.ERROR, payload)
 
     async def _send_reply(
         self,
