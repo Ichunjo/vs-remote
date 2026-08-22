@@ -1,0 +1,31 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+    "helpers:pinGitHubActionDigests",
+    ":automergeMinor",
+    ":automergePr",
+    ":automergeRequireAllStatusChecks",
+    ":disableDependencyDashboard",
+    ":disableRateLimiting",
+    ":semanticCommits",
+    ":semanticCommitScopeDisabled",
+    ":semanticCommitTypeAll(deps)"
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "groupName": "Security fixes",
+    "addLabels": ["security"]
+  },
+  "packageRules": [
+    {
+      "extends": [":semanticCommitTypeAll(ci)"],
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    },
+    {
+      "automerge": true,
+      "matchUpdateTypes": ["pin", "digest", "pinDigest"]
+    }
+  ]
+}
