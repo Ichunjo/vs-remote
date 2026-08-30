@@ -611,7 +611,11 @@ def _build_error_payload(e: ExecutionError | Exception) -> RemoteErrorPayload:
     orig = e.parent_error if isinstance(e, ExecutionError) else e
 
     tb = traceback.TracebackException.from_exception(orig)
-    frames = [StackFrame.from_summary(f) for f in tb.stack if not f.filename.startswith("src/cython/")]
+    frames = [
+        StackFrame.from_summary(f)
+        for f in tb.stack
+        if not f.filename.lower().startswith(("src/cython/", "vapoursynth.pyx"))
+    ]
 
     code_line: str | None = None
     if isinstance(orig, SyntaxError) and orig.filename is not None:
@@ -626,10 +630,7 @@ def _build_error_payload(e: ExecutionError | Exception) -> RemoteErrorPayload:
 
         for f in reversed(frames):
             norm = f.filename.lower().replace("\\", "/")
-            if not any(
-                m in norm
-                for m in ("site-packages/", "/lib/", ".venv/", "venv/", "lib/python", "vsengine/", "vsremote/")
-            ):
+            if not any(m in norm for m in ("site-packages/", "/lib/", "vsengine/", "vsremote/", "vapoursynth.pyx")):
                 filename = f.filename
                 lineno = f.lineno
                 code_line = f.code
