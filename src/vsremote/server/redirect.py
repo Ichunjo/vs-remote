@@ -1,59 +1,63 @@
 from __future__ import annotations
 
+import io
 import logging
 import sys
 import threading
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from collections.abc import Callable, Generator, Iterable
+from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from logging import Handler, LogRecord
-from typing import Literal, TextIO, override
+from typing import Any, Literal, Self, TextIO, override
 
 import msgspec
 
 from ..protocol import RemoteLogRecord, StreamEvent, StreamOutputEvent
 
-_IN_LOGGING = threading.local()
-_ORIG_HANDLER_HANDLE = Handler.handle
+# Scoped context flag to suppress re-capturing streams when log handlers write to stderr/stdout
+_IN_LOGGING: ContextVar[bool] = ContextVar("in_logging", default=False)
 _PATCH_LOCK = threading.Lock()
 _PATCH_COUNT = 0
-_ACTIVE_REDIRECTORS: dict[str, StreamRedirector] = {}
+_ORIG_CALL_HANDLERS = logging.Logger.callHandlers
 
 
-def _restore_installed_redirectors() -> None:
-    for name, redir in list(_ACTIVE_REDIRECTORS.items()):
-        current = getattr(sys, name, None)
-        if current is not None and current is not redir:
-            redir._original_stream = current
-            setattr(sys, name, redir)
-
-
-def _patched_handler_handle(self: Handler, record: LogRecord) -> bool:
-    _IN_LOGGING.depth = getattr(_IN_LOGGING, "depth", 0) + 1
+def _patched_call_handlers(self: logging.Logger, record: LogRecord) -> None:
+    token = _IN_LOGGING.set(True)
     try:
-        return _ORIG_HANDLER_HANDLE(self, record)
+        _ORIG_CALL_HANDLERS(self, record)
     finally:
-        _IN_LOGGING.depth -= 1
-        _restore_installed_redirectors()
+        _IN_LOGGING.reset(token)
 
 
-def _install_logging_patch() -> None:
+def _install_logging_hook() -> None:
     global _PATCH_COUNT
 
     with _PATCH_LOCK:
         if _PATCH_COUNT == 0:
-            setattr(Handler, "handle", _patched_handler_handle)
+            setattr(logging.Logger, "callHandlers", _patched_call_handlers)
         _PATCH_COUNT += 1
 
 
-def _uninstall_logging_patch() -> None:
+def _uninstall_logging_hook() -> None:
     global _PATCH_COUNT
 
     with _PATCH_LOCK:
         if _PATCH_COUNT > 0:
             _PATCH_COUNT -= 1
-
             if _PATCH_COUNT == 0:
-                setattr(Handler, "handle", _ORIG_HANDLER_HANDLE)
+                setattr(logging.Logger, "callHandlers", _ORIG_CALL_HANDLERS)
+
+
+def _serialize_log_args(args: Any) -> tuple[Any, ...]:
+    if not args:
+        return ()
+
+    raw_args = args if isinstance(args, tuple) else (args,)
+    try:
+        msgspec.msgpack.encode(raw_args)
+        return raw_args
+    except Exception:
+        return tuple(str(a) for a in raw_args)
 
 
 class LogForwarder(Handler):
@@ -69,24 +73,6 @@ class LogForwarder(Handler):
             return
 
         try:
-            args = record.args
-            if isinstance(args, tuple):
-                try:
-                    msgspec.msgpack.encode(args)
-                    serializable_args = args
-                except Exception:
-                    serializable_args = tuple(str(a) for a in args)
-            elif isinstance(args, dict):
-                try:
-                    msgspec.msgpack.encode(args)
-                    serializable_args = (args,)
-                except Exception:
-                    serializable_args = (str(args),)
-            elif args:
-                serializable_args = (str(args),)
-            else:
-                serializable_args = ()
-
             exc_text = None
             if record.exc_info and not record.exc_text:
                 record.exc_text = self.format(record)
@@ -99,7 +85,7 @@ class LogForwarder(Handler):
                     levelno=record.levelno,
                     levelname=record.levelname,
                     msg=record.msg,
-                    args=serializable_args,
+                    args=_serialize_log_args(record.args),
                     filename=record.filename,
                     lineno=record.lineno,
                     funcName=record.funcName,
@@ -112,60 +98,103 @@ class LogForwarder(Handler):
             self.handleError(record)
 
 
-class StreamRedirector:
-    """Redirector for sys.stdout and sys.stderr that emits StreamOutputEvents."""
+class StreamRedirector(io.TextIOBase):
+    """
+    Standard text stream redirector for sys.stdout/sys.stderr.
+    Tees output to the underlying stream and dispatches StreamOutputEvents.
+    """
 
     def __init__(self, name: Literal["stdout", "stderr"], dispatch: Callable[[StreamEvent], None]) -> None:
+        super().__init__()
         self.name: Literal["stdout", "stderr"] = name
         self.dispatch = dispatch
-        self._original_stream: TextIO = getattr(sys, name)
+        self._target: TextIO = getattr(sys, name)
         self._installed = False
 
-    def __getattr__(self, name: str) -> object:
-        return getattr(self._original_stream, name)
+    def __getattr__(self, attr: str) -> Any:
+        return getattr(self._target, attr)
+
+    @override
+    def __enter__(self) -> Self:
+        self.install()
+        return self
+
+    @override
+    def __exit__(self, *_: object) -> None:
+        self.uninstall()
+
+    @property
+    @override
+    def closed(self) -> bool:
+        return getattr(self._target, "closed", False)
+
+    @override
+    def close(self) -> None: ...
+
+    @override
+    def fileno(self) -> int:
+        fileno_fn = getattr(self._target, "fileno", None)
+        if fileno_fn is not None:
+            return fileno_fn()
+        raise io.UnsupportedOperation("Underlying stream has no fileno")
+
+    @override
+    def flush(self) -> None:
+        if not self.closed:
+            with suppress(ValueError):
+                self._target.flush()
+
+    @override
+    def isatty(self) -> bool:
+        return getattr(self._target, "isatty", lambda: False)()
+
+    @override
+    def readable(self) -> bool:
+        return False
+
+    @override
+    def seekable(self) -> bool:
+        return False
+
+    @override
+    def write(self, text: str) -> int:
+        written = self._target.write(text)
+        if text and not _IN_LOGGING.get():
+            self.dispatch(StreamOutputEvent(stream=self.name, text=text))
+        return written
+
+    @override
+    def writelines(self, lines: Iterable[str]) -> None:  # type: ignore[override]
+        for line in lines:
+            self.write(line)
+
+    @override
+    def writable(self) -> bool:
+        return True
 
     def install(self) -> None:
         if not self._installed:
-            self._original_stream = getattr(sys, self.name)
+            self._target = getattr(sys, self.name)
             setattr(sys, self.name, self)
-            _ACTIVE_REDIRECTORS[self.name] = self
             self._installed = True
-            _install_logging_patch()
+            _install_logging_hook()
 
     def uninstall(self) -> None:
         if self._installed:
-            _ACTIVE_REDIRECTORS.pop(self.name, None)
-            setattr(sys, self.name, self._original_stream)
+            setattr(sys, self.name, self._target)
             self._installed = False
-            _uninstall_logging_patch()
-
-    def write(self, text: str) -> int:
-        res = self._original_stream.write(text)
-        if text and getattr(_IN_LOGGING, "depth", 0) == 0:
-            self.dispatch(StreamOutputEvent(stream=self.name, text=text))
-        return res
-
-    def flush(self) -> None:
-        self._original_stream.flush()
-
-    def isatty(self) -> bool:
-        return getattr(self._original_stream, "isatty", lambda: False)()
+            _uninstall_logging_hook()
 
 
 @contextmanager
 def capture_streams(dispatch: Callable[[StreamEvent], None]) -> Generator[None, None, None]:
-    stdout_redir = StreamRedirector("stdout", dispatch)
-    stderr_redir = StreamRedirector("stderr", dispatch)
     log_handler = LogForwarder(dispatch)
 
-    stdout_redir.install()
-    stderr_redir.install()
     root_logger = logging.getLogger()
     root_logger.addHandler(log_handler)
 
-    try:
-        yield
-    finally:
-        stdout_redir.uninstall()
-        stderr_redir.uninstall()
-        root_logger.removeHandler(log_handler)
+    with StreamRedirector("stdout", dispatch), StreamRedirector("stderr", dispatch):
+        try:
+            yield
+        finally:
+            root_logger.removeHandler(log_handler)
