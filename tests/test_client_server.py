@@ -1270,12 +1270,14 @@ def test_script_runner_audio_node_filtering(tmp_path: Path) -> None:
 def test_setup_logging_no_handlers() -> None:
     root = logging.getLogger()
     orig = list(root.handlers)
+    orig_level = root.level
     root.handlers.clear()
     try:
         setup_logging(level=logging.INFO)
         assert len(root.handlers) >= 1
     finally:
         root.handlers = orig
+        root.setLevel(orig_level)
 
 
 def test_is_loopback_address() -> None:

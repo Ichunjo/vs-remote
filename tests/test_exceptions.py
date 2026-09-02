@@ -103,3 +103,4 @@ def test_remote_error_structured_payload() -> None:
     assert dict_err.lineno == 10
     assert dict_err.code_line == "raise ValueError('bad value')"
     assert dict_err.formatted_traceback == "Traceback..."
+    assert dict_err.frames == []

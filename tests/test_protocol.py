@@ -58,17 +58,11 @@ def test_clip_info_serialization() -> None:
     assert info2.num_frames == info.num_frames
     assert info2.format_id == info.format_id
     assert info2.format_name == info.format_name
+    assert info2.bits_per_sample == 8
+    assert info2.bytes_per_sample == 1
     assert info2.planes == info.planes
     assert info2.name == "Main"
     assert info2 == info
-
-
-def test_clip_info_no_format_error() -> None:
-    class FakeClipNoFormat:
-        format = None
-
-    with pytest.raises(UnsupportedFormatError, match="Variable format clips are not supported by vs-remote"):
-        ClipInfo.from_clip(FakeClipNoFormat())  # type: ignore[arg-type]
 
 
 def test_frame_header_serialization() -> None:

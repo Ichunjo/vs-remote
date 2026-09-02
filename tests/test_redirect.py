@@ -80,19 +80,25 @@ def test_capture_streams_context_manager() -> None:
     events = list[StreamEvent]()
     original_stdout = sys.stdout
     original_stderr = sys.stderr
+    root_logger = logging.getLogger()
+    orig_level = root_logger.level
+    root_logger.setLevel(logging.INFO)
 
-    with capture_streams(events.append):
-        assert sys.stdout is not original_stdout
-        assert sys.stderr is not original_stderr
+    try:
+        with capture_streams(events.append):
+            assert sys.stdout is not original_stdout
+            assert sys.stderr is not original_stderr
 
-        print("captured print output")
-        logging.getLogger().info("captured root log")
+            print("captured print output")
+            logging.getLogger().info("captured root log")
 
-    assert sys.stdout is original_stdout
-    assert sys.stderr is original_stderr
+        assert sys.stdout is original_stdout
+        assert sys.stderr is original_stderr
 
-    log_events = [e for e in events if isinstance(e, RemoteLogRecord)]
-    stream_events = [e for e in events if isinstance(e, StreamOutputEvent)]
+        log_events = [e for e in events if isinstance(e, RemoteLogRecord)]
+        stream_events = [e for e in events if isinstance(e, StreamOutputEvent)]
 
-    assert any("captured root log" in e.msg for e in log_events)
-    assert any("captured print output" in e.text for e in stream_events)
+        assert any("captured root log" in e.msg for e in log_events)
+        assert any("captured print output" in e.text for e in stream_events)
+    finally:
+        root_logger.setLevel(orig_level)
