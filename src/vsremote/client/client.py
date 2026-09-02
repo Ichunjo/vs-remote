@@ -308,12 +308,12 @@ class RemoteClient:
                     "stack_info": event.stack_info,
                 }
                 rec = logging.makeLogRecord(record_dict)
-                setattr(rec, "_is_remote", True)
+                rec._is_remote = True
                 if self.forward_logs:
                     logging.getLogger(rec.name).handle(rec)
 
             case StreamOutputEvent():
-                if not (target := self._streams[event.stream]):
+                if not (target := self._streams.get(event.stream)):
                     return
                 try:
                     target.write(event.text)
