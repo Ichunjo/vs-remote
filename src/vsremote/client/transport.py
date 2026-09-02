@@ -482,27 +482,36 @@ class ClientTransport:
 
     def _create_socket(self) -> tuple[zmq.asyncio.Context, zmq.asyncio.Socket]:
         ctx = zmq.asyncio.Context()
-        socket = ctx.socket(zmq.DEALER)
-        socket.setsockopt(zmq.LINGER, 0)
+        socket: zmq.asyncio.Socket | None = None
+        try:
+            socket = ctx.socket(zmq.DEALER)
+            socket.setsockopt(zmq.LINGER, 0)
 
-        if self.curve_server_key:
-            socket.setsockopt(zmq.CURVE_SERVERKEY, self.curve_server_key)
+            if self.curve_server_key:
+                socket.setsockopt(zmq.CURVE_SERVERKEY, self.curve_server_key)
 
-            if not self.curve_public_key or not self.curve_secret_key:
-                client_pub, client_sec = zmq.curve_keypair()
-            else:
-                client_pub = self.curve_public_key
-                client_sec = self.curve_secret_key
+                if not self.curve_public_key or not self.curve_secret_key:
+                    client_pub, client_sec = zmq.curve_keypair()
+                else:
+                    client_pub = self.curve_public_key
+                    client_sec = self.curve_secret_key
 
-            socket.setsockopt(zmq.CURVE_PUBLICKEY, client_pub)
-            socket.setsockopt(zmq.CURVE_SECRETKEY, client_sec)
+                socket.setsockopt(zmq.CURVE_PUBLICKEY, client_pub)
+                socket.setsockopt(zmq.CURVE_SECRETKEY, client_sec)
 
-        socket.setsockopt(zmq.SNDBUF, 8 * 1024 * 1024)
-        socket.setsockopt(zmq.RCVBUF, 8 * 1024 * 1024)
-        socket.setsockopt(zmq.SNDHWM, 1024)
-        socket.setsockopt(zmq.RCVHWM, 1024)
-        socket.connect(self.address)
-        return ctx, socket
+            socket.setsockopt(zmq.SNDBUF, 8 * 1024 * 1024)
+            socket.setsockopt(zmq.RCVBUF, 8 * 1024 * 1024)
+            socket.setsockopt(zmq.SNDHWM, 1024)
+            socket.setsockopt(zmq.RCVHWM, 1024)
+            socket.connect(self.address)
+            return ctx, socket
+        except BaseException:
+            if socket is not None:
+                with contextlib.suppress(Exception):
+                    socket.close(linger=0)
+            with contextlib.suppress(Exception):
+                ctx.destroy(linger=0)
+            raise
 
     async def _send_loop(self, socket: zmq.asyncio.Socket, queue: asyncio.Queue[list[bytes] | None]) -> None:
         while self._running:
@@ -554,11 +563,13 @@ class ClientTransport:
             self._pending.clear()
 
         if self._socket:
-            self._socket.close(linger=0)
+            with contextlib.suppress(Exception):
+                self._socket.close(linger=0)
             self._socket = None
 
         if self._ctx:
-            self._ctx.destroy(linger=0)
+            with contextlib.suppress(Exception):
+                self._ctx.destroy(linger=0)
             self._ctx = None
 
     def _send_message(self, req_id: int, cmd: Command, payload_bytes: bytes) -> None:
