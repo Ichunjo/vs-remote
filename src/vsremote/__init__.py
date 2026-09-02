@@ -3,7 +3,7 @@ from __future__ import annotations
 from . import client, exceptions, protocol, server
 from .api import is_preview, set_output
 from .cli import info, keygen, ping, pipe, serve
-from .client import RemoteClient, source
+from .client import ClientTransport, RemoteClient, source
 from .exceptions import (
     EnvironmentNotSetError,
     MalformedMessageError,
@@ -30,6 +30,7 @@ from .exceptions import (
 )
 
 __all__ = [
+    "ClientTransport",
     "EnvironmentNotSetError",
     "MalformedMessageError",
     "OutputNotFoundError",
@@ -55,7 +56,11 @@ __all__ = [
     "VSRemoteError",
     "client",
     "exceptions",
+    "info",
     "is_preview",
+    "keygen",
+    "ping",
+    "pipe",
     "protocol",
     "serve",
     "server",
