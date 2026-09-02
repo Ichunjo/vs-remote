@@ -75,7 +75,8 @@ class LogForwarder(Handler):
         try:
             exc_text = None
             if record.exc_info and not record.exc_text:
-                record.exc_text = self.format(record)
+                formatter = self.formatter or logging.Formatter()
+                record.exc_text = formatter.formatException(record.exc_info)
             if record.exc_text:
                 exc_text = record.exc_text
 
@@ -84,7 +85,7 @@ class LogForwarder(Handler):
                     name=record.name,
                     levelno=record.levelno,
                     levelname=record.levelname,
-                    msg=record.msg,
+                    msg=str(record.msg),
                     args=_serialize_log_args(record.args),
                     filename=record.filename,
                     lineno=record.lineno,
@@ -135,7 +136,7 @@ class StreamRedirector(io.TextIOBase):
     def fileno(self) -> int:
         fileno_fn = getattr(self._target, "fileno", None)
         if fileno_fn is not None:
-            return fileno_fn()
+            return int(fileno_fn())
         raise io.UnsupportedOperation("Underlying stream has no fileno")
 
     @override
@@ -192,9 +193,8 @@ def capture_streams(dispatch: Callable[[StreamEvent], None]) -> Generator[None, 
 
     root_logger = logging.getLogger()
     root_logger.addHandler(log_handler)
-
-    with StreamRedirector("stdout", dispatch), StreamRedirector("stderr", dispatch):
-        try:
+    try:
+        with StreamRedirector("stdout", dispatch), StreamRedirector("stderr", dispatch):
             yield
-        finally:
-            root_logger.removeHandler(log_handler)
+    finally:
+        root_logger.removeHandler(log_handler)
