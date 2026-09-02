@@ -77,7 +77,7 @@ def test_cli_subcommands(
         # Test pipe command with Y4M header
         buf = io.BytesIO()
         monkeypatch.setattr(sys.stdout, "buffer", buf)
-        pipe(client_cfg, output=0, y4m=True, prefetch=2, environment=vpy_policy)
+        pipe(client_cfg, output=0, y4m=True, prefetch=2)
 
         output_bytes = buf.getvalue()
         assert output_bytes.startswith(b"YUV4MPEG2 C420 W160 H120 F24:1 Ip A0:0 XLENGTH=3\n")

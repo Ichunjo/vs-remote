@@ -219,7 +219,6 @@ def pipe(
     prefetch: int = 8,
     backlog: int | None = None,
     compression: Compression = "zstd",
-    environment: Annotated[Policy | ManagedEnvironment | None, Parameter(show=False)] = None,
 ) -> None:
     """
     Stream video frames directly from the remote server to stdout in Y4M format or raw planes.
