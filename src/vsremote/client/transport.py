@@ -73,6 +73,7 @@ class ClientTransport:
 
         self._thread: threading.Thread | None = None
         self._ready_event = threading.Event()
+        self._startup_future: UnifiedFuture[None] | None = None
         self._running = False
         self._start_lock = threading.RLock()
         self._started = False
@@ -136,6 +137,9 @@ class ClientTransport:
 
             self._running = False
 
+            if self._startup_future and not self._startup_future.done():
+                self._startup_future.cancel()
+
             with self._lock:
                 for pending_fut in self._pending.values():
                     if not pending_fut.done():
@@ -144,18 +148,21 @@ class ClientTransport:
 
             # Cancel active coroutines in the worker loop
             if self._loop and self._loop.is_running():
-                self._loop.call_soon_threadsafe(self._cancel_tasks)
+                with contextlib.suppress(RuntimeError):
+                    self._loop.call_soon_threadsafe(self._cancel_tasks)
 
             if self._thread and self._thread.is_alive() and self._thread != threading.current_thread():
                 self._thread.join(timeout=1.0)
             self._thread = None
 
             self._started = False
+            self._running = False
             logger.debug("Client transport closed")
 
     def _cancel_tasks(self) -> None:
-        for task in asyncio.all_tasks(self._loop):
-            task.cancel()
+        if self._loop and not self._loop.is_closed():
+            for task in asyncio.all_tasks(self._loop):
+                task.cancel()
 
     @overload
     def send_request(
@@ -420,25 +427,47 @@ class ClientTransport:
         )
 
     def _start_worker_thread(self) -> None:
+        self._startup_future = UnifiedFuture()
         self._ready_event.clear()
         self._thread = threading.Thread(target=self._worker, name="VSRemoteTransport", daemon=True)
         self._thread.start()
 
-        if not self._ready_event.wait(timeout=5.0):
-            raise RemoteTimeoutError("Timed out waiting for transport worker thread to initialize")
+        try:
+            self._startup_future.result(timeout=5.0)
+        except TimeoutError as exc:
+            self.close()
+            raise RemoteTimeoutError("Timed out waiting for transport worker thread to initialize") from exc
+        except BaseException:
+            self.close()
+            raise
 
     def _worker(self) -> None:
         try:
             asyncio.run(self._async_worker(), loop_factory=asyncio.SelectorEventLoop)
+        except BaseException as exc:
+            if self._startup_future and not self._startup_future.done():
+                self._startup_future.set_exception(exc)
+            else:
+                logger.exception("Unhandled exception in transport worker thread")
         finally:
             self._loop = None
 
     async def _async_worker(self) -> None:
         self._loop = asyncio.get_running_loop()
         self._send_queue = asyncio.Queue()
-        self._ctx, self._socket = self._create_socket()
-        self._running = True
-        self._ready_event.set()
+        try:
+            self._ctx, self._socket = self._create_socket()
+            if self._startup_future is None or self._startup_future.done():
+                self._cleanup_resources()
+                return
+            self._running = True
+            self._ready_event.set()
+            self._startup_future.set_result(None)
+        except BaseException as exc:
+            if self._startup_future and not self._startup_future.done():
+                self._startup_future.set_exception(exc)
+            self._cleanup_resources()
+            return
 
         logger.debug("Client transport connected to %s", self.address)
 
