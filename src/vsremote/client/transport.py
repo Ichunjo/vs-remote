@@ -98,13 +98,13 @@ class ClientTransport:
     def __enter__(self) -> Self:
         return self.start()
 
-    def __exit__(self, *args: object) -> None:
+    def __exit__(self, *_: object) -> None:
         self.close()
 
     async def __aenter__(self) -> Self:
         return self.start()
 
-    async def __aexit__(self, *args: object) -> None:
+    async def __aexit__(self, *_: object) -> None:
         self.close()
 
     def __del__(self) -> None:
