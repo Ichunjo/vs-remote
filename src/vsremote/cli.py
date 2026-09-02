@@ -320,8 +320,7 @@ def main_meta(*tokens: Annotated[str, Parameter(show=False, allow_leading_hyphen
     """
     setup_logging(level=logging.DEBUG if verbose else logging.INFO)
 
-    if tokens:
-        app(tokens)
+    app(tokens)
 
 
 def main() -> None:
