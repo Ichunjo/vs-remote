@@ -115,78 +115,81 @@ class ServerDaemon:
         ensure_vsengine_loop(loop)
         self._loop = loop
 
-        self._ctx = zmq.asyncio.Context()
-
-        if self.curve_secret_key and self.curve_allowed_keys:
-            self._zap_socket = self._ctx.socket(zmq.REP)
-            self._zap_socket.setsockopt(zmq.LINGER, 0)
-            self._zap_socket.bind("inproc://zeromq.zap.01")
-            self._zap_task = asyncio.create_task(self._zap_handler_loop(), name="VSRemoteZAP")
-
-        self._socket = self._ctx.socket(zmq.ROUTER)
-
-        if self.curve_secret_key:
-            self._socket.setsockopt(zmq.CURVE_SERVER, 1)
-            self._socket.setsockopt(zmq.CURVE_SECRETKEY, self.curve_secret_key)
-            if self.curve_public_key:
-                self._socket.setsockopt(zmq.CURVE_PUBLICKEY, self.curve_public_key)
-
-            if self.curve_allowed_keys:
-                self._socket.setsockopt(zmq.ZAP_DOMAIN, b"vsremote")
-
-        self._socket.setsockopt(zmq.SNDBUF, 8 * 1024 * 1024)
-        self._socket.setsockopt(zmq.RCVBUF, 8 * 1024 * 1024)
-        self._socket.setsockopt(zmq.SNDHWM, 1024)
-        self._socket.setsockopt(zmq.RCVHWM, 1024)
-        self._socket.bind(self.address)
-        self._executor = ThreadPoolExecutor(max_workers=self.max_workers)
-        self._send_lock = asyncio.Lock()
-        self._running = True
-
-        # Install log forwarder and stream redirectors
-        self._log_handler = LogForwarder(self._on_event_from_thread)
-        logging.getLogger().addHandler(self._log_handler)
-
-        self._stdout_redirector = StreamRedirector("stdout", self._on_event_from_thread)
-        self._stderr_redirector = StreamRedirector("stderr", self._on_event_from_thread)
-        self._stdout_redirector.install()
-        self._stderr_redirector.install()
-
-        logger.info(
-            "Server started on %s (default compression: %s, allow_eval: %s, auth: %s, curve: %s, client_auth: %s)",
-            self.address,
-            self.compression,
-            self.allow_eval,
-            bool(self.auth_token),
-            bool(self.curve_secret_key),
-            bool(self.curve_allowed_keys),
-        )
-
-        if not _is_loopback_address(self.address):
-            if not (self.auth_token or self.curve_secret_key):
-                if self.allow_eval:
-                    logger.warning("Server bound to %s with allow_eval=True and NO auth/encryption", self.address)
-                    logger.warning("Anyone on the network can execute arbitrary code.")
-                else:
-                    logger.warning("Server bound to %s without auth or encryption.", self.address)
-            elif self.allow_eval:
-                logger.warning(
-                    "Server bound to %s with allow_eval=True. "  # no fmt
-                    "Authenticated clients can execute arbitrary code.",
-                    self.address,
-                )
-
-        if ready_event is not None:
-            ready_event.set()
-
+        initialized = False
         try:
+            self._ctx = zmq.asyncio.Context()
+
+            if self.curve_secret_key and self.curve_allowed_keys:
+                self._zap_socket = self._ctx.socket(zmq.REP)
+                self._zap_socket.setsockopt(zmq.LINGER, 0)
+                self._zap_socket.bind("inproc://zeromq.zap.01")
+                self._zap_task = asyncio.create_task(self._zap_handler_loop(), name="VSRemoteZAP")
+
+            self._socket = self._ctx.socket(zmq.ROUTER)
+
+            if self.curve_secret_key:
+                self._socket.setsockopt(zmq.CURVE_SERVER, 1)
+                self._socket.setsockopt(zmq.CURVE_SECRETKEY, self.curve_secret_key)
+                if self.curve_public_key:
+                    self._socket.setsockopt(zmq.CURVE_PUBLICKEY, self.curve_public_key)
+
+                if self.curve_allowed_keys:
+                    self._socket.setsockopt(zmq.ZAP_DOMAIN, b"vsremote")
+
+            self._socket.setsockopt(zmq.SNDBUF, 8 * 1024 * 1024)
+            self._socket.setsockopt(zmq.RCVBUF, 8 * 1024 * 1024)
+            self._socket.setsockopt(zmq.SNDHWM, 1024)
+            self._socket.setsockopt(zmq.RCVHWM, 1024)
+            self._socket.bind(self.address)
+            self._executor = ThreadPoolExecutor(max_workers=self.max_workers)
+            self._send_lock = asyncio.Lock()
+            self._running = True
+
+            # Install log forwarder and stream redirectors
+            self._log_handler = LogForwarder(self._on_event_from_thread)
+            logging.getLogger().addHandler(self._log_handler)
+
+            self._stdout_redirector = StreamRedirector("stdout", self._on_event_from_thread)
+            self._stderr_redirector = StreamRedirector("stderr", self._on_event_from_thread)
+            self._stdout_redirector.install()
+            self._stderr_redirector.install()
+
+            logger.info(
+                "Server started on %s (default compression: %s, allow_eval: %s, auth: %s, curve: %s, client_auth: %s)",
+                self.address,
+                self.compression,
+                self.allow_eval,
+                bool(self.auth_token),
+                bool(self.curve_secret_key),
+                bool(self.curve_allowed_keys),
+            )
+
+            if not _is_loopback_address(self.address):
+                if not (self.auth_token or self.curve_secret_key):
+                    if self.allow_eval:
+                        logger.warning("Server bound to %s with allow_eval=True and NO auth/encryption", self.address)
+                        logger.warning("Anyone on the network can execute arbitrary code.")
+                    else:
+                        logger.warning("Server bound to %s without auth or encryption.", self.address)
+                elif self.allow_eval:
+                    logger.warning(
+                        "Server bound to %s with allow_eval=True. "  # no fmt
+                        "Authenticated clients can execute arbitrary code.",
+                        self.address,
+                    )
+
+            initialized = True
+            if ready_event is not None:
+                ready_event.set()
+
             while self._running:
                 msg = await self._socket.recv_multipart()
                 task = asyncio.create_task(self._handle_request(msg))
                 self._active_tasks.add(task)
                 task.add_done_callback(self._active_tasks.discard)
         except (asyncio.CancelledError, zmq.ZMQError):
-            pass
+            if not initialized:
+                raise
         finally:
             await self.stop()
 
@@ -218,9 +221,6 @@ class ServerDaemon:
 
     async def stop(self) -> None:
         """Stop server and clean up active connections and resources."""
-        if not self._running:
-            return
-
         self._running = False
         logger.info("Shutting down server...")
 
