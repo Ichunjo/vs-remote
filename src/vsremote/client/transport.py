@@ -74,7 +74,7 @@ class ClientTransport:
         self._thread: threading.Thread | None = None
         self._ready_event = threading.Event()
         self._running = False
-        self._start_lock = threading.Lock()
+        self._start_lock = threading.RLock()
         self._started = False
 
         if (curve_public_key is None) != (curve_secret_key is None):
@@ -131,7 +131,7 @@ class ClientTransport:
     def close(self) -> None:
         """Close socket, cancel pending requests, and stop background transport thread."""
         with self._start_lock:
-            if not self._started or not self._running:
+            if not self._started and not self._running and self._thread is None:
                 return
 
             self._running = False
