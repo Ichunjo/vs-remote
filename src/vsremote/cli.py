@@ -328,7 +328,8 @@ def main() -> None:
 
 
 async def _watch_stop(daemon: ServerDaemon, stop_event: threading.Event) -> None:
-    await asyncio.get_running_loop().run_in_executor(None, stop_event.wait)
+    while not stop_event.is_set():  # noqa: ASYNC110
+        await asyncio.sleep(0.5)
     await daemon.stop()
 
 
