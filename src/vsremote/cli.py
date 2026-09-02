@@ -8,11 +8,9 @@ import sys
 import threading
 import time
 from collections.abc import Sequence
-from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Annotated, override
 
-import vapoursynth as vs
 import zmq
 from cyclopts import App, Parameter
 from cyclopts.help import DefaultFormatter, HelpPanel
@@ -240,7 +238,7 @@ def pipe(
         stdout_buf = sys.stdout.buffer
 
         if y4m:
-            stdout_buf.write(_get_y4m_header(clip_info, environment))
+            stdout_buf.write(_get_y4m_header(clip_info))
             stdout_buf.flush()
 
         prefetch_count = max(0, prefetch)
@@ -339,7 +337,7 @@ async def _wakeup() -> None:
         await asyncio.sleep(0.5)
 
 
-def _get_y4m_header(info: ClipInfo, environment: Policy | ManagedEnvironment | None) -> bytes:
+def _get_y4m_header(info: ClipInfo) -> bytes:
     if info.num_planes == 1:
         y4mformat = "mono"
     elif info.num_planes == 3:
@@ -363,17 +361,7 @@ def _get_y4m_header(info: ClipInfo, environment: Policy | ManagedEnvironment | N
     else:
         raise UnsupportedFormatError(f"Unsupported number of planes for Y4M: {info.num_planes}")
 
-    if isinstance(policy := environment, Policy):
-        ctx = policy.new_environment().use()
-    elif isinstance(environment, ManagedEnvironment):
-        ctx = environment.use()
-    else:
-        ctx = nullcontext()
-
-    with ctx:
-        bits = vs.core.get_video_format(info.format_id).bits_per_sample
-
-    if bits > 8:
+    if (bits := info.bits_per_sample) > 8:
         y4mformat += f"p{bits}"
 
     header = (
