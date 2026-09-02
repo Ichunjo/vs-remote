@@ -13,7 +13,7 @@ def validate_curve_key(curve_key: str | bytes | None, name: str = "curve_key") -
         The normalized key as bytes (either 40-byte ASCII Z85 or 32-byte binary), or None.
 
     Raises:
-        ValueError: If curve_key length does not match 40 Z85 characters or 32/40 bytes.
+        ValueError: If curve_key length does not match 40 Z85 characters or 32 or 40 bytes.
     """
     if (isinstance(curve_key, str) and len(curve_key) != 40) or (
         isinstance(curve_key, bytes) and len(curve_key) not in (32, 40)
@@ -31,15 +31,21 @@ def validate_curve_allowed_keys(curve_allowed_keys: Sequence[str | bytes] | None
         Set of 32-byte binary public keys.
 
     Raises:
-        ValueError: If key length or Z85 encoding is invalid.
+        ValueError: If key length is invalid.
     """
     keys = set[bytes]()
 
     for item in curve_allowed_keys or []:
-        if (isinstance(item, bytes) and len(item) not in (40, 32)) or (isinstance(item, str) and len(item) != 40):
+        if (isinstance(item, bytes) and len(item) not in (32, 40)) or (isinstance(item, str) and len(item) != 40):
+            length = len(item)
             raise ValueError(
-                f"Invalid Curve key length ({len(item)} bytes). Expected 40 Z85 characters or 32 or 40 bytes."
+                f"Invalid Curve key length ({length} {'bytes' if isinstance(item, bytes) else 'characters'}). "
+                "Expected 40 Z85 characters or 32 or 40 bytes."
             )
-        keys.add(zmq.utils.z85.decode(item))
+
+        if isinstance(item, bytes) and len(item) == 32:
+            keys.add(item)
+        else:
+            keys.add(zmq.utils.z85.decode(item))
 
     return keys
