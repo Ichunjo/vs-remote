@@ -487,18 +487,18 @@ class ServerDaemon:
                     self._executor, _extract_and_compress_planes, frame, compression_str
                 )
 
-            header = FrameHeader(
-                status=StatusCode.OK,
-                request_id=request_id,
-                n=n,
-                output_index=output_index,
-                compression=compression_str,
-                plane_sizes=[p.nbytes if isinstance(p, memoryview) else len(p) for p in planes],
-                props=clean_props,
-            )
+                header = FrameHeader(
+                    status=StatusCode.OK,
+                    request_id=request_id,
+                    n=n,
+                    output_index=output_index,
+                    compression=compression_str,
+                    plane_sizes=[p.nbytes if isinstance(p, memoryview) else len(p) for p in planes],
+                    props=clean_props,
+                )
 
-            # Stream response back to client
-            await self._send_reply(req, StatusCode.OK, pack_payload(header), planes)
+                # Stream response back to client
+                await self._send_reply(req, StatusCode.OK, pack_payload(header), planes)
 
         except asyncio.CancelledError:
             logger.debug("Frame request %d for output %d was cancelled", n, output_index)
