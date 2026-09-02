@@ -203,6 +203,7 @@ class ClipInfo(msgspec.Struct, frozen=True):
     format_name: str
     num_planes: int
     bytes_per_sample: int
+    bits_per_sample: int
     subsampling_w: int
     subsampling_h: int
     planes: list[PlaneInfo]
@@ -210,7 +211,7 @@ class ClipInfo(msgspec.Struct, frozen=True):
 
     @classmethod
     def from_clip(cls, clip: vs.VideoNode, name: str = "") -> Self:
-        if not clip.format:
+        if not clip.format.id:
             raise UnsupportedFormatError("Variable format clips are not supported by vs-remote")
 
         fmt = clip.format
@@ -225,6 +226,7 @@ class ClipInfo(msgspec.Struct, frozen=True):
             format_name=fmt.name,
             num_planes=fmt.num_planes,
             bytes_per_sample=fmt.bytes_per_sample,
+            bits_per_sample=fmt.bits_per_sample,
             subsampling_w=fmt.subsampling_w,
             subsampling_h=fmt.subsampling_h,
             planes=PlaneInfo.from_clip(clip),
