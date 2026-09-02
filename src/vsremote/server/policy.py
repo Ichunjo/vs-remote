@@ -29,10 +29,10 @@ class RemotePolicy(Policy):
     @override
     def new_environment(self, flags_creation: int | None = None) -> ManagedEnvironment:
         logger.debug("Creating new VapourSynth environment in RemotePolicy")
-        data = self.api.create_environment(flags_creation if flags_creation is not None else self.flags_creation)
+        env = super().new_environment(flags_creation)
 
         self.api.set_logger(
-            data,
+            env._data,
             lambda mt, msg: vslogger.log(
                 VS_LOG_LEVEL_MAP[MessageType(mt)],
                 msg,
@@ -40,6 +40,4 @@ class RemotePolicy(Policy):
                 stacklevel=2,
             ),
         )
-
-        env = self.api.wrap_environment(data)
-        return ManagedEnvironment(env, data, self)
+        return env
