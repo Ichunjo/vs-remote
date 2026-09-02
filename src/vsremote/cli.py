@@ -45,7 +45,7 @@ app = App("vsremote", console=console, default_parameter=Parameter(negative=()),
 
 
 @Parameter(name="*")
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ClientConfig:
     """Connection and authentication parameters for remote server operations."""
 
