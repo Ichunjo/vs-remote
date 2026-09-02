@@ -79,6 +79,11 @@ def set_output(node: vs.RawNode, index_or_name: int | str | bool | None = None, 
     _output_metadata[index] = effective_name
 
 
+def clear_output_metadata() -> None:
+    """Clear all registered output metadata."""
+    _output_metadata.clear()
+
+
 def _resolve_var_name(obj: Any, *, frame_depth: int = 1) -> str | None:
     try:
         frame = sys._getframe(frame_depth)

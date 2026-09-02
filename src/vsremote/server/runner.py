@@ -14,7 +14,7 @@ import vapoursynth as vs
 from vsengine.policy import ContextVarStore, ManagedEnvironment, Policy
 from vsengine.vpy import Script, load_code, load_script
 
-from ..api.output import _output_metadata
+from ..api.output import _output_metadata, clear_output_metadata
 from ..exceptions import EnvironmentNotSetError, OutputNotFoundError, ScriptNotLoadedError
 from ..protocol import ClipInfo, OutputItem, StreamEvent
 from .policy import RemotePolicy
@@ -191,6 +191,7 @@ class ScriptRunner:
             self._clip_infos.clear()
             self._output_items.clear()
             self._startup_events.clear()
+            clear_output_metadata()
 
             if self._script:
                 self._script.dispose()
