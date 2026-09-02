@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import linecache
 import os
 import threading
@@ -16,7 +17,6 @@ from vsengine.vpy import Script, load_code, load_script
 from ..api.output import _output_metadata
 from ..exceptions import EnvironmentNotSetError, OutputNotFoundError, ScriptNotLoadedError
 from ..protocol import ClipInfo, OutputItem, StreamEvent
-from ..utils import gc_collect
 from .policy import RemotePolicy
 from .redirect import capture_streams
 
@@ -200,7 +200,7 @@ class ScriptRunner:
                 self._environment.dispose()
 
             self._environment = None
-        gc_collect()
+        gc.collect()
 
     def close(self) -> None:
         """Clean up the environment and release VapourSynth resources."""

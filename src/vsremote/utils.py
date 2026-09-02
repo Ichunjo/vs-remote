@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import gc
 from logging import getLogger
 
 from rich.console import Console
@@ -16,16 +15,6 @@ logger = getLogger(__name__)
 def ensure_vsengine_loop(loop: asyncio.AbstractEventLoop | None = None) -> None:
     if get_loop() is NO_LOOP:
         set_loop(AsyncIOLoop(loop))
-
-
-def gc_collect() -> None:
-    logger.debug("Running garbage collection")
-
-    for i in range(3):
-        gc.collect(generation=i)
-
-    for _ in range(3):
-        gc.collect()
 
 
 console = Console(stderr=True)
