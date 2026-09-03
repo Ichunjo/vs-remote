@@ -5,8 +5,9 @@ import contextlib
 import os
 import threading
 from collections.abc import Callable
+from concurrent.futures import Future
 from logging import getLogger
-from typing import Any, Self, overload
+from typing import Any, NamedTuple, Self, overload
 
 import zmq
 import zmq.asyncio
@@ -67,9 +68,7 @@ class ClientTransport:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._send_queue: asyncio.Queue[list[bytes] | None] | None = None
 
-        self._pending = dict[int, UnifiedFuture[list[bytes]]]()
-        self._next_request_id = 1
-        self._lock = threading.Lock()
+        self._tracker = RequestTracker()
 
         self._thread: threading.Thread | None = None
         self._startup_future: UnifiedFuture[None] | None = None
@@ -139,11 +138,7 @@ class ClientTransport:
             if self._startup_future and not self._startup_future.done():
                 self._startup_future.cancel()
 
-            with self._lock:
-                for pending_fut in self._pending.values():
-                    if not pending_fut.done():
-                        pending_fut.set_exception(ConnectionResetError("Transport closed"))
-                self._pending.clear()
+            self._tracker.close()
 
             # Cancel active coroutines in the worker loop
             if self._loop and self._loop.is_running():
@@ -201,31 +196,28 @@ class ClientTransport:
             MalformedMessageError: If the server response cannot be framed.
             UnknownStatusCodeError: If the server returns an unrecognized status code byte.
         """
-        fut = UnifiedFuture[list[bytes]]()
-
-        def to_response_envelope(frames: list[bytes]) -> ResponseEnvelope[T] | ResponseEnvelope[bytes]:
-            return ResponseEnvelope.from_frames(frames, response_type)
-
         if not self._started:
-            return fut.reject(TransportNotStartedError("Transport is not started"))
+            return UnifiedFuture.reject(TransportNotStartedError("Transport is not started"))
 
         if not self._running:
-            return fut.reject(TransportClosedError("ClientTransport is closed"))
+            return UnifiedFuture.reject(TransportClosedError("ClientTransport is closed"))
 
-        with self._lock:
-            req_id = self._next_request_id
-            self._next_request_id = ((self._next_request_id + 1) & 0x7FFFFFFF) or 1
-            self._pending[req_id] = fut
+        req_id, fut = self._tracker.allocate(response_type)
+
+        def on_done(f: Future[Any]) -> None:
+            if f.cancelled():
+                self._cancel_request(req_id)
+
+        fut.add_done_callback(on_done)
 
         payload_bytes = pack_payload(payload) if payload is not None else b""
         try:
             self._send_message(req_id, cmd, payload_bytes)
         except Exception as exc:
-            with self._lock:
-                self._pending.pop(req_id, None)
+            self._tracker.pop(req_id)
             fut.set_exception(exc)
 
-        return fut.map(to_response_envelope, cancel_cb=lambda: self._cancel_request(req_id))
+        return fut
 
     def ping(self) -> UnifiedFuture[bool]:
         """
@@ -545,17 +537,10 @@ class ClientTransport:
                     logger.exception("Error decoding or handling server stream event")
             return
 
-        with self._lock:
-            fut = self._pending.pop(req_id, None)
-        if fut and not fut.done():
-            fut.set_result(parts[1:])
+        self._tracker.resolve(req_id, parts[1:])
 
     def _cleanup_resources(self) -> None:
-        with self._lock:
-            for pending_fut in self._pending.values():
-                if not pending_fut.done():
-                    pending_fut.set_exception(ConnectionResetError("Transport closed"))
-            self._pending.clear()
+        self._tracker.close()
 
         if self._socket:
             with contextlib.suppress(Exception):
@@ -583,12 +568,79 @@ class ClientTransport:
             raise TransportClosedError("ClientTransport is closed")
 
     def _cancel_request(self, req_id: int) -> None:
-        with self._lock:
-            fut = self._pending.pop(req_id, None)
-        if fut and not fut.done():
-            fut.cancel()
-
-        if self._running and self._loop and self._send_queue is not None:
+        cancelled = self._tracker.cancel(req_id)
+        if cancelled and self._running and self._loop and self._send_queue is not None:
             cancel_payload = pack_payload(CancelRequest(request_id=req_id))
             with contextlib.suppress(TransportError, RuntimeError):
                 self._send_message(0, Command.CANCEL_REQUEST, cancel_payload)
+
+
+class PendingEntry(NamedTuple):
+    future: UnifiedFuture[ResponseEnvelope[Any]]
+    response_type: Any | None
+
+    def resolve(self, frames: list[bytes]) -> None:
+        if self.future.done():
+            return
+        try:
+            self.future.set_result(ResponseEnvelope.from_frames(frames, self.response_type))
+        except Exception as exc:
+            self.future.set_exception(exc)
+
+    def reject(self, exc: BaseException) -> None:
+        if not self.future.done():
+            self.future.set_exception(exc)
+
+    def cancel(self) -> None:
+        if not self.future.done():
+            self.future.cancel()
+
+
+class RequestTracker:
+    def __init__(self) -> None:
+        self._pending = dict[int, PendingEntry]()
+        self._next_id = 1
+        self._lock = threading.Lock()
+
+    def allocate[T](self, response_type: TypeForm[T] | None = None) -> tuple[int, UnifiedFuture[ResponseEnvelope[T]]]:
+        fut = UnifiedFuture[ResponseEnvelope[T]]()
+
+        with self._lock:
+            req_id = self._next_id
+
+            while req_id in self._pending or req_id == 0:
+                req_id = ((req_id + 1) & 0x7FFFFFFF) or 1
+
+            self._next_id = ((req_id + 1) & 0x7FFFFFFF) or 1
+            self._pending[req_id] = PendingEntry(fut, response_type)
+
+        return req_id, fut
+
+    def pop(self, req_id: int) -> PendingEntry | None:
+        with self._lock:
+            return self._pending.pop(req_id, None)
+
+    def resolve(self, req_id: int, frames: list[bytes]) -> bool:
+        with self._lock:
+            entry = self._pending.pop(req_id, None)
+
+        if entry is not None:
+            entry.resolve(frames)
+            return True
+
+        return False
+
+    def cancel(self, req_id: int) -> bool:
+        with self._lock:
+            entry = self._pending.pop(req_id, None)
+        if entry is not None:
+            entry.cancel()
+            return True
+        return False
+
+    def close(self, exc: BaseException | None = None) -> None:
+        error = exc if exc is not None else ConnectionResetError("Transport closed")
+        with self._lock:
+            for entry in self._pending.values():
+                entry.reject(error)
+            self._pending.clear()
