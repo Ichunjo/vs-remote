@@ -72,7 +72,6 @@ class ClientTransport:
         self._lock = threading.Lock()
 
         self._thread: threading.Thread | None = None
-        self._ready_event = threading.Event()
         self._startup_future: UnifiedFuture[None] | None = None
         self._running = False
         self._start_lock = threading.RLock()
@@ -158,11 +157,6 @@ class ClientTransport:
             self._started = False
             self._running = False
             logger.debug("Client transport closed")
-
-    def _cancel_tasks(self) -> None:
-        if self._loop and not self._loop.is_closed():
-            for task in asyncio.all_tasks(self._loop):
-                task.cancel()
 
     @overload
     def send_request(
@@ -426,9 +420,13 @@ class ClientTransport:
             .catch(lambda _: False)
         )
 
+    def _cancel_tasks(self) -> None:
+        if self._loop and not self._loop.is_closed():
+            for task in asyncio.all_tasks(self._loop):
+                task.cancel()
+
     def _start_worker_thread(self) -> None:
         self._startup_future = UnifiedFuture()
-        self._ready_event.clear()
         self._thread = threading.Thread(target=self._worker, name="VSRemoteTransport", daemon=True)
         self._thread.start()
 
@@ -461,7 +459,6 @@ class ClientTransport:
                 self._cleanup_resources()
                 return
             self._running = True
-            self._ready_event.set()
             self._startup_future.set_result(None)
         except BaseException as exc:
             if self._startup_future and not self._startup_future.done():
@@ -554,8 +551,6 @@ class ClientTransport:
             fut.set_result(parts[1:])
 
     def _cleanup_resources(self) -> None:
-        self._ready_event.set()
-
         with self._lock:
             for pending_fut in self._pending.values():
                 if not pending_fut.done():
