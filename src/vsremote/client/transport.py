@@ -473,8 +473,8 @@ class ClientTransport:
 
         try:
             async with asyncio.TaskGroup() as tg:
-                tg.create_task(self._send_loop(self._socket, self._send_queue))
-                tg.create_task(self._recv_loop(self._socket))
+                tg.create_task(self._send_loop())
+                tg.create_task(self._recv_loop())
         except* (asyncio.CancelledError, zmq.ZMQError):
             pass
         finally:
@@ -513,20 +513,20 @@ class ClientTransport:
                 ctx.destroy(linger=0)
             raise
 
-    async def _send_loop(self, socket: zmq.asyncio.Socket, queue: asyncio.Queue[list[bytes] | None]) -> None:
-        while self._running:
-            msg = await queue.get()
+    async def _send_loop(self) -> None:
+        while self._running and self._send_queue is not None and self._socket is not None:
+            msg = await self._send_queue.get()
             if msg is None or not self._running:
                 break
             try:
-                await socket.send_multipart(msg)
+                await self._socket.send_multipart(msg)
             except Exception:
                 logger.exception("Failed to send message over DEALER socket")
 
-    async def _recv_loop(self, socket: zmq.asyncio.Socket) -> None:
-        while self._running:
+    async def _recv_loop(self) -> None:
+        while self._running and self._socket is not None:
             try:
-                parts = await socket.recv_multipart()
+                parts = await self._socket.recv_multipart()
             except (asyncio.CancelledError, zmq.ZMQError):
                 break
             except Exception:
