@@ -40,6 +40,9 @@ dynamic = ["version"]
 [project.scripts]
 vsremote = "vsremote.cli:main"
 
+[project.urls]
+"Source Code" = "https://github.com/Ichunjo/vs-remote"
+
 [dependency-groups]
 dev = [
     "hatchling>=1.32.0",
