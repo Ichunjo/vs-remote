@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import queue
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future
@@ -75,6 +76,8 @@ class ClientTransport:
         self._running = False
         self._start_lock = threading.RLock()
         self._started = False
+        self._event_queue: queue.SimpleQueue[StreamEvent | None] | None = None
+        self._event_thread: threading.Thread | None = None
 
         if (curve_public_key is None) != (curve_secret_key is None):
             raise ValueError("curve_public_key and curve_secret_key must both be specified for client authentication")
@@ -130,7 +133,7 @@ class ClientTransport:
     def close(self) -> None:
         """Close socket, cancel pending requests, and stop background transport thread."""
         with self._start_lock:
-            if not self._started and not self._running and self._thread is None:
+            if not self._started and not self._running and self._thread is None and self._event_thread is None:
                 return
 
             self._running = False
@@ -145,9 +148,25 @@ class ClientTransport:
                 with contextlib.suppress(RuntimeError):
                     self._loop.call_soon_threadsafe(self._cancel_tasks)
 
-            if self._thread and self._thread.is_alive() and self._thread != threading.current_thread():
+            if (
+                self._thread  # no fmt
+                and self._thread.is_alive()
+                and self._thread != threading.current_thread()
+            ):
                 self._thread.join(timeout=1.0)
             self._thread = None
+
+            if self._event_queue is not None:
+                self._event_queue.put(None)
+
+            if (
+                self._event_thread
+                and self._event_thread.is_alive()
+                and self._event_thread != threading.current_thread()
+            ):
+                self._event_thread.join(timeout=1.0)
+            self._event_thread = None
+            self._event_queue = None
 
             self._started = False
             self._running = False
@@ -418,6 +437,11 @@ class ClientTransport:
                 task.cancel()
 
     def _start_worker_thread(self) -> None:
+        if self.on_event is not None and (self._event_thread is None or not self._event_thread.is_alive()):
+            self._event_queue = queue.SimpleQueue()
+            self._event_thread = threading.Thread(None, self._event_worker, name="VSRemoteEventDispatcher", daemon=True)
+            self._event_thread.start()
+
         self._startup_future = UnifiedFuture()
         self._thread = threading.Thread(target=self._worker, name="VSRemoteTransport", daemon=True)
         self._thread.start()
@@ -430,6 +454,16 @@ class ClientTransport:
         except BaseException:
             self.close()
             raise
+
+    def _event_worker(self) -> None:
+        while True:
+            if self._event_queue is None or (event := self._event_queue.get()) is None:
+                break
+            if self.on_event is not None:
+                try:
+                    self.on_event(event)
+                except Exception:
+                    logger.exception("Error handling server stream event in event dispatcher")
 
     def _worker(self) -> None:
         try:
@@ -529,12 +563,13 @@ class ClientTransport:
         req_id = int.from_bytes(parts[0], byteorder="big")
 
         if req_id == 0:
-            if self.on_event and len(parts) >= 3 and parts[1] == bytes([StatusCode.OK]):
+            if self._event_queue is not None and len(parts) >= 3 and parts[1] == bytes([StatusCode.OK]):
                 try:
                     event = unpack_payload(parts[2], RemoteLogRecord | StreamOutputEvent)
-                    self.on_event(event)
                 except Exception:
-                    logger.exception("Error decoding or handling server stream event")
+                    logger.exception("Error decoding server stream event")
+                else:
+                    self._event_queue.put(event)
             return
 
         self._tracker.resolve(req_id, parts[1:])

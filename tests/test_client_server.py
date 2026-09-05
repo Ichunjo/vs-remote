@@ -5,6 +5,7 @@ import io
 import logging
 import struct
 import sys
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -856,6 +857,43 @@ def test_client_stream_event_handlers() -> None:
     client_faulty = RemoteClient("tcp://127.0.0.1:5555", stdout=faulty_stream)
     client_faulty._handle_event(StreamOutputEvent(stream="stdout", text="error"))
     assert faulty_stream.write.called
+
+
+def test_transport_event_dispatch_decoupling() -> None:
+    received = list[tuple[str, StreamEvent]]()
+    evt = threading.Event()
+
+    def on_event(event: StreamEvent) -> None:
+        # Simulate blocking I/O (e.g. slow flush or logging lock)
+        time.sleep(0.01)
+        received.append((threading.current_thread().name, event))
+        if len(received) == 10:
+            evt.set()
+
+    with ClientTransport("tcp://127.0.0.1:5555", on_event=on_event) as trans:
+        # Dispatch 10 events via _dispatch_response
+        t0 = time.perf_counter()
+        for i in range(10):
+            parts = [
+                b"\x00\x00\x00\x00",
+                bytes([StatusCode.OK]),
+                pack_payload(StreamOutputEvent(stream="stdout", text=f"chunk_{i}")),
+            ]
+            trans._dispatch_response(parts)
+        dispatch_duration = time.perf_counter() - t0
+
+        # All 10 dispatches must return immediately without waiting for the 10 * 10ms sleep
+        assert dispatch_duration < 0.05, f"Dispatch took too long ({dispatch_duration:.4f}s), was it blocked?"
+
+        # Wait for worker thread to process all items
+        assert evt.wait(timeout=2.0), "Timed out waiting for decoupled event dispatcher to process events"
+
+        # Verify items were processed on the dispatcher thread in strict FIFO order
+        assert len(received) == 10
+        for i, (thread_name, event) in enumerate(received):
+            assert thread_name == "VSRemoteEventDispatcher"
+            assert isinstance(event, StreamOutputEvent)
+            assert event.text == f"chunk_{i}"
 
 
 @pytest.mark.vpy("initial-core")
