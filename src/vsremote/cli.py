@@ -252,9 +252,7 @@ def pipe(
                     if next_to_request >= clip_info.num_frames or next_to_request > n + prefetch_count:
                         break
                     if next_to_request not in inflight:
-                        inflight[next_to_request] = transport.request_frame(
-                            output, next_to_request, compression=compression
-                        )
+                        inflight[next_to_request] = transport.request_frame(output, next_to_request, compression)
                     else:
                         break
 
