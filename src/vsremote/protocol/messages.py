@@ -325,3 +325,51 @@ class CancelRequest(msgspec.Struct, frozen=True):
     """Request payload to cancel an in-flight server task by request ID."""
 
     request_id: int
+
+
+class ClientSessionStats(msgspec.Struct, frozen=True):
+    """Telemetry for an active client connection."""
+
+    identity: str
+    active_requests: int
+    total_requests: int
+    last_active_seconds_ago: float
+
+
+class ServerStats(msgspec.Struct, frozen=True):
+    """Point-in-time telemetry snapshot of the remote server."""
+
+    uptime_seconds: float
+    active_script: str | None
+    num_outputs: int
+
+    # Frame & request counters
+    total_frame_requests: int
+    completed_frames: int
+    failed_frames: int
+    cancelled_frames: int
+    in_flight_requests: int
+
+    # Throughput & latency (computed over rolling window)
+    fps: float
+    bandwidth_mbps: float
+    avg_render_time_ms: float
+    avg_compress_time_ms: float
+
+    # Compression metrics
+    compression_mode: Compression
+    total_uncompressed_bytes: int
+    total_compressed_bytes: int
+    compression_ratio: float
+
+    # VapourSynth Core & System metrics
+    vs_version: str
+    vs_threads: int
+    vs_used_cache_mb: float
+    vs_max_cache_mb: int
+    process_rss_mb: float | None = None
+    process_cpu_percent: float | None = None
+
+    # Available outputs and connected clients
+    outputs: list[OutputItem] = msgspec.field(default_factory=list)
+    active_clients: list[ClientSessionStats] = msgspec.field(default_factory=list)

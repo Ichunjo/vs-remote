@@ -6,6 +6,7 @@ import ipaddress
 import logging
 import secrets
 import threading
+import time
 import traceback
 import urllib.parse
 from collections.abc import Callable, Sequence
@@ -19,7 +20,7 @@ import zmq.asyncio
 import zmq.utils.z85
 from vsengine.vpy import ExecutionError
 
-from ..exceptions import TransportClosedError
+from ..exceptions import EnvironmentNotSetError, TransportClosedError
 from ..protocol import (
     DEFAULT_ADDRESS,
     CancelRequest,
@@ -45,6 +46,7 @@ from ..protocol import (
     validate_curve_key,
 )
 from ..utils import ensure_vsengine_loop
+from .metrics import ServerMetricsCollector
 from .redirect import LogForwarder, StreamRedirector
 from .runner import ScriptRunner
 
@@ -108,6 +110,7 @@ class ServerDaemon:
         self.curve_secret_key = validate_curve_key(curve_secret_key, "curve_secret_key")
         self.curve_public_key = validate_curve_key(curve_public_key, "curve_public_key")
         self.curve_allowed_keys = validate_curve_allowed_keys(curve_allowed_keys)
+        self.metrics = ServerMetricsCollector()
 
     async def start(self, ready_event: threading.Event | asyncio.Event | None = None) -> None:
         """Start the async server loop."""
@@ -347,13 +350,31 @@ class ServerDaemon:
         if (current_task := asyncio.current_task()) is not None:
             self._inflight_tasks[key] = current_task
 
+        self.metrics.on_request_start(req.identity)
         try:
             await self._dispatch_request(req)
         finally:
+            self.metrics.on_request_end(req.identity)
             self._inflight_tasks.pop(key, None)
 
     async def _dispatch_request(self, req: RequestEnvelope) -> None:
         match req.command:
+            case Command.GET_STATS:
+                try:
+                    env = self.runner.environment
+                except EnvironmentNotSetError as e:
+                    await self._send_error(req, StatusCode.ERROR, str(e))
+                    return
+
+                with env.use():
+                    stats = self.metrics.snapshot(
+                        active_script=self.runner.script_path,
+                        outputs=self.runner.list_outputs(),
+                        compression_mode=self.compression,
+                        in_flight_requests=len(self._inflight_tasks),
+                    )
+                await self._send_reply(req, StatusCode.OK, pack_payload(stats))
+
             case Command.CANCEL_REQUEST:
                 try:
                     cancel_payload = unpack_payload(req.payload_bytes, CancelRequest)
@@ -462,6 +483,8 @@ class ServerDaemon:
         n = frame_req.n
         compression_str = frame_req.compression
 
+        self.metrics.on_frame_request()
+
         try:
             clip = self.runner.get_clip(output_index)
         except KeyError as e:
@@ -477,15 +500,28 @@ class ServerDaemon:
             )
             return await self._send_reply(req, header.status, pack_payload(header))
 
+        t_render_start = time.perf_counter()
         try:
             with self.runner.environment.use():
                 future = clip.get_frame_async(n)
 
             with await asyncio.wrap_future(future) as frame:
+                t_rendered = time.perf_counter()
+                render_time_ms = (t_rendered - t_render_start) * 1000.0
+
                 clean_props = sanitize_props(frame.props)
-                planes = await asyncio.get_running_loop().run_in_executor(
+
+                t_comp_start = time.perf_counter()
+                planes, uncompressed_bytes = await asyncio.get_running_loop().run_in_executor(
                     self._executor, _extract_and_compress_planes, frame, compression_str
                 )
+                t_comp_end = time.perf_counter()
+                compress_time_ms = (t_comp_end - t_comp_start) * 1000.0
+
+                plane_sizes = [p.nbytes if isinstance(p, memoryview) else len(p) for p in planes]
+                compressed_bytes = sum(plane_sizes)
+
+                self.metrics.on_frame_completed(uncompressed_bytes, compressed_bytes, render_time_ms, compress_time_ms)
 
                 header = FrameHeader(
                     status=StatusCode.OK,
@@ -493,7 +529,7 @@ class ServerDaemon:
                     n=n,
                     output_index=output_index,
                     compression=compression_str,
-                    plane_sizes=[p.nbytes if isinstance(p, memoryview) else len(p) for p in planes],
+                    plane_sizes=plane_sizes,
                     props=clean_props,
                 )
 
@@ -501,9 +537,11 @@ class ServerDaemon:
                 await self._send_reply(req, StatusCode.OK, pack_payload(header), planes)
 
         except asyncio.CancelledError:
+            self.metrics.on_frame_cancelled()
             logger.debug("Frame request %d for output %d was cancelled", n, output_index)
             raise
         except Exception as e:
+            self.metrics.on_frame_failed()
             logger.exception("Failed to render frame %d for output %d", n, output_index)
             tb = traceback.format_exc()
             header = FrameHeader(
@@ -572,18 +610,22 @@ class ServerDaemon:
             await self._socket.send_multipart(parts)
 
 
-def _extract_and_compress_planes(frame: vs.VideoFrame, compression: Compression) -> list[bytes | memoryview]:
+def _extract_and_compress_planes(
+    frame: vs.VideoFrame, compression: Compression
+) -> tuple[list[bytes | memoryview], int]:
     planes = list[bytes | memoryview]()
     num_planes = frame.format.num_planes
+    uncompressed_size = 0
 
     for p in range(num_planes):
         plane = frame[p]
+        uncompressed_size += plane.nbytes
         if compression == "none":
             planes.append(plane.cast("B") if plane.c_contiguous else plane.tobytes())
         else:
             planes.append(compress_plane(plane, compression))
 
-    return planes
+    return planes, uncompressed_size
 
 
 def _is_loopback_address(address: str) -> bool:

@@ -84,6 +84,7 @@ vsremote pipe tcp://192.168.1.100:5555 --output 0 | ffmpeg -i - -c:v libx264 out
 | `serve`  | Host a `.vpy` script or execution server                            | `vsremote serve script.vpy --address tcp://127.0.0.1:5555`                            |
 | `ping`   | Test connection and measure round-trip latency                      | `vsremote ping tcp://192.168.1.100:5555`                                              |
 | `info`   | Display metadata for all outputs on the remote server               | `vsremote info tcp://192.168.1.100:5555`                                              |
+| `top`    | Live TUI performance, throughput, and memory monitoring dashboard   | `vsremote top tcp://192.168.1.100:5555`                                               |
 | `pipe`   | Stream frames directly to stdout as Y4M or raw planes               | `vsremote pipe tcp://192.168.1.100:5555 --y4m --output 0 \| x265 --y4m - -o out.hevc` |
 | `keygen` | Generate a Curve25519 keypair for CurveZMQ encryption & client auth | `vsremote keygen`                                                                     |
 

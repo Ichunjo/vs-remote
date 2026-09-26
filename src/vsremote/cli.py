@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 import logging
 import os
 import signal
@@ -11,17 +13,22 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Annotated, override
 
+import msgspec
 import zmq
 from cyclopts import App, Parameter
 from cyclopts.help import DefaultFormatter, HelpPanel
 from rich.console import Console, ConsoleOptions
+from rich.live import Live
+from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 from vsengine import ManagedEnvironment, Policy, UnifiedFuture
 
 from .client.transport import ClientTransport
-from .exceptions import UnsupportedFormatError
-from .protocol import DEFAULT_ADDRESS, ClipInfo, Compression, FrameHeader, StatusCode, decompress_plane
+from .exceptions import RemoteError, TransportError, UnsupportedFormatError
+from .protocol import DEFAULT_ADDRESS, ClipInfo, Compression, FrameHeader, ServerStats, StatusCode, decompress_plane
 from .server import ScriptRunner, ServerDaemon
+from .tui import build_dashboard
 from .utils import console, setup_logging
 
 logger = logging.getLogger(__name__)
@@ -272,6 +279,59 @@ def pipe(
                 stdout_buf.write(decompressed)
 
             stdout_buf.flush()
+
+
+@app.command
+def top(
+    config: ClientConfig = DEFAULT_CLIENT_CONFIG,
+    *,
+    interval: float = 1.0,
+    json_output: Annotated[bool, Parameter("--json")] = False,
+) -> None:
+    """
+    Monitor real-time performance, throughput, and memory metrics of a vs-remote server.
+
+    Args:
+        interval: Polling interval in seconds.
+        json_output: Output a single JSON snapshot and exit.
+    """
+    with contextlib.suppress(KeyboardInterrupt), config.create_transport(subscribe_streams=False) as transport:
+        if json_output:
+            stats = transport.get_stats().result(timeout=10.0)
+            raw = msgspec.json.encode(stats)
+            # Pretty-print formatted JSON
+            parsed = json.loads(raw)
+            print(json.dumps(parsed, indent=2))
+            return
+
+        last_known_stats: ServerStats | None = None
+        error_msg: str | None = None
+
+        with Live(console=console, screen=True, refresh_per_second=int(max(1.0 / interval, 2.0))) as live:
+            while True:
+                try:
+                    stats = transport.get_stats().result(timeout=max(interval * 2.0, 3.0))
+                    last_known_stats = stats
+                    error_msg = None
+                except TimeoutError:
+                    error_msg = f"Server unreachable at {config.address} (timed out)"
+                except (TransportError, RemoteError, Exception) as exc:
+                    err_str = str(exc).strip()
+                    error_type = type(exc).__name__
+                    error_msg = f"Connection error: {err_str}" if err_str else f"Connection error ({error_type})"
+
+                if last_known_stats is not None:
+                    dashboard = build_dashboard(last_known_stats, config.address, interval, status_msg=error_msg)
+                    live.update(dashboard)
+                else:
+                    # Initial connection attempt failed
+                    connecting_panel = Panel(
+                        Text(f"Connecting to {config.address}...\n{error_msg or ''}", style="bold yellow"),
+                        title="[bold cyan]vsremote top[/bold cyan]",
+                    )
+                    live.update(connecting_panel)
+
+                time.sleep(interval)
 
 
 @app.command

@@ -14,6 +14,7 @@ from .constants import (
 from .keys import validate_curve_allowed_keys, validate_curve_key
 from .messages import (
     CancelRequest,
+    ClientSessionStats,
     ClipInfo,
     FrameHeader,
     FrameRequest,
@@ -27,6 +28,7 @@ from .messages import (
     RemoteLogRecord,
     RequestEnvelope,
     ResponseEnvelope,
+    ServerStats,
     StackFrame,
     StreamEvent,
     StreamOutputEvent,
@@ -39,6 +41,7 @@ __all__ = [
     "DEFAULT_PORT",
     "PROTOCOL_VERSION",
     "CancelRequest",
+    "ClientSessionStats",
     "ClipInfo",
     "Command",
     "Compression",
@@ -54,6 +57,7 @@ __all__ = [
     "RemoteLogRecord",
     "RequestEnvelope",
     "ResponseEnvelope",
+    "ServerStats",
     "StackFrame",
     "StatusCode",
     "StatusCodeError",

@@ -19,6 +19,7 @@ from ..protocol import (
     FrameHeader,
     OutputItem,
     RemoteLogRecord,
+    ServerStats,
     StatusCode,
     StreamEvent,
     StreamOutputEvent,
@@ -130,6 +131,22 @@ class RemoteClient:
             RemoteError: If any other server-side error occurred.
         """
         return self.transport.list_outputs()
+
+    def get_stats(self) -> UnifiedFuture[ServerStats]:
+        """
+        Query real-time performance and resource telemetry from the remote server.
+
+        Returns:
+            A UnifiedFuture resolving to a ServerStats struct.
+
+        Raises (via Future):
+            TransportNotStartedError: If the transport is not started.
+            TransportClosedError: If the transport is closed.
+            RemoteAuthenticationError: If authentication failed (StatusCode.UNAUTHORIZED).
+            RemoteExecutionError: If querying stats failed on the server (StatusCode.ERROR).
+            RemoteError: If any other server-side error occurred.
+        """
+        return self.transport.get_stats()
 
     def load_script(self, script_path: str | os.PathLike[str], chdir: bool = True) -> UnifiedFuture[list[OutputItem]]:
         """

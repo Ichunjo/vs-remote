@@ -37,6 +37,7 @@ from ..protocol import (
     ReloadRequest,
     RemoteLogRecord,
     ResponseEnvelope,
+    ServerStats,
     StatusCode,
     StreamEvent,
     StreamOutputEvent,
@@ -270,6 +271,25 @@ class ClientTransport:
             Command.LIST_OUTPUTS,
             response_type=list[OutputItem],
         ).map(lambda r: r.raise_for_status("Failed to list outputs").payload)
+
+    def get_stats(self) -> UnifiedFuture[ServerStats]:
+        """
+        Query real-time performance and resource telemetry from the remote server.
+
+        Returns:
+            A UnifiedFuture resolving to a ServerStats struct.
+
+        Raises (via Future):
+            TransportNotStartedError: If the transport is not started.
+            TransportClosedError: If the transport is closed.
+            RemoteAuthenticationError: If authentication failed (StatusCode.UNAUTHORIZED).
+            RemoteExecutionError: If telemetry retrieval failed on the server (StatusCode.ERROR).
+            RemoteError: If any other server-side error occurred.
+        """
+        return self.send_request(
+            Command.GET_STATS,
+            response_type=ServerStats,
+        ).map(lambda r: r.raise_for_status("Failed to get server stats").payload)
 
     def load_script(self, script_path: str | os.PathLike[str], chdir: bool = True) -> UnifiedFuture[list[OutputItem]]:
         """

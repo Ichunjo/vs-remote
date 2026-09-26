@@ -34,6 +34,7 @@ dependencies = [
     "msgspec>=0.21.1",
     "cyclopts>=4.23.3",
     "rich>=15.0.0",
+    "psutil>=7.0.0",
 ]
 dynamic = ["version"]
 
@@ -53,6 +54,7 @@ dev = [
     "ruff~=0.16.0",
     "setuptools>=84.0.0",
     "types-mypy-extensions>=1.1.0.20260724",
+    "types-psutil>=7.0.0",
     "types-setuptools>=84.0.0.20260812",
     "vsstubs>=2.3.0",
 ]
