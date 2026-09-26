@@ -12,7 +12,7 @@ It mirrors remote clips as local `VideoNode` proxies, streaming frames on demand
 - Variable resolution and format clips are not supported.
 - Frame property serialization only preserves primitive types (`int`, `float`, `str`, `bytes`, and lists of primitives).
 
-    Non-primitive objects such as embedded `VideoFrame` references (`_Alpha`) fall back to their string `repr()`.
+  Non-primitive objects such as embedded `VideoFrame` references (`_Alpha`) fall back to their string `repr()`.
 
 ---
 
@@ -179,36 +179,36 @@ VapourSynth scripts are Python code. Evaluating untrusted `.vpy` scripts or enab
 - **Defaults**: The server binds to `127.0.0.1` with `--allow-eval` disabled by default.
 - **Remote / WAN (Recommended)**: Use SSH port forwarding so no ZeroMQ ports are exposed to the internet:
 
-    ```bash
-    # Remote server (bind to localhost)
-    vsremote serve script.vpy --address tcp://127.0.0.1:5555
+  ```bash
+  # Remote server (bind to localhost)
+  vsremote serve script.vpy --address tcp://127.0.0.1:5555
 
-    # Local client (SSH tunnel)
-    ssh -N -L 5555:127.0.0.1:5555 user@remote-server.com
+  # Local client (SSH tunnel)
+  ssh -N -L 5555:127.0.0.1:5555 user@remote-server.com
 
-    # Connect locally
-    vsremote info --address tcp://127.0.0.1:5555
-    ```
+  # Connect locally
+  vsremote info --address tcp://127.0.0.1:5555
+  ```
 
 - **Direct LAN (Encryption Only)**: Enable CurveZMQ (Curve25519) encryption and optional pre-shared token authentication:
 
-    ```bash
-    # Server (generate ephemeral keypair or provide static secret key)
-    vsremote serve script.vpy --address tcp://192.168.1.100:5555 --curve-secret-key "<SERVER_SECRET>" --auth-token "secret"
+  ```bash
+  # Server (generate ephemeral keypair or provide static secret key)
+  vsremote serve script.vpy --address tcp://192.168.1.100:5555 --curve-secret-key "<SERVER_SECRET>" --auth-token "secret"
 
-    # Client
-    vsremote info tcp://192.168.1.100:5555 --curve-server-key "<SERVER_PUBLIC>" --auth-token "secret"
-    ```
+  # Client
+  vsremote info tcp://192.168.1.100:5555 --curve-server-key "<SERVER_PUBLIC>" --auth-token "secret"
+  ```
 
 - **Direct LAN (Mutual Authentication & Whitelisting)**: Whitelist authorized client public keys on the server:
 
-    ```bash
-    # Server (whitelist allowed client public keys)
-    vsremote serve script.vpy --address tcp://192.168.1.100:5555 --curve-secret-key "<SERVER_SECRET>" --curve-allowed-keys "<CLIENT_PUBLIC>"
+  ```bash
+  # Server (whitelist allowed client public keys)
+  vsremote serve script.vpy --address tcp://192.168.1.100:5555 --curve-secret-key "<SERVER_SECRET>" --curve-allowed-keys "<CLIENT_PUBLIC>"
 
-    # Client (connect with client keypair)
-    vsremote info tcp://192.168.1.100:5555 --curve-server-key "<SERVER_PUBLIC>" --curve-public-key "<CLIENT_PUBLIC>" --curve-secret-key "<CLIENT_SECRET>"
-    ```
+  # Client (connect with client keypair)
+  vsremote info tcp://192.168.1.100:5555 --curve-server-key "<SERVER_PUBLIC>" --curve-public-key "<CLIENT_PUBLIC>" --curve-secret-key "<CLIENT_SECRET>"
+  ```
 
 - **Untrusted Scripts/Code**: Run `vsremote` in a rootless container with read-only mounts and dropped capabilities.
 
