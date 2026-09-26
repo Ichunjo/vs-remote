@@ -16,7 +16,7 @@ from typing import Annotated, override
 import msgspec
 import zmq
 from cyclopts import App, Parameter
-from cyclopts.help import DefaultFormatter, HelpPanel
+from cyclopts.help import DefaultFormatter, HelpEntry, HelpPanel
 from rich.console import Console, ConsoleOptions
 from rich.live import Live
 from rich.panel import Panel
@@ -37,12 +37,14 @@ logger = logging.getLogger(__name__)
 class CleanHelpFormatter(DefaultFormatter):
     @override
     def __call__(self, console: Console, options: ConsoleOptions, panel: HelpPanel) -> None:
-        panel.entries = [
-            entry.copy(positive_names=entry.positive_names[1:])
-            if len(entry.positive_names) > 1 and not entry.positive_names[0].startswith("-")
-            else entry
-            for entry in panel.entries
-        ]
+        cleaned_entries = list[HelpEntry]()
+        for entry in panel.entries:
+            if getattr(entry, "positional_label", None) and getattr(entry, "all_options", ()):
+                entry = entry.copy(positional_label=None)
+            if len(entry.positive_names) > 1 and not entry.positive_names[0].startswith("-"):
+                entry = entry.copy(positive_names=entry.positive_names[1:])
+            cleaned_entries.append(entry)
+        panel.entries = cleaned_entries
         super().__call__(console, options, panel)
 
 

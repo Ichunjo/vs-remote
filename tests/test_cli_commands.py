@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import vapoursynth as vs
+from rich.console import Console
 from vsengine.futures import UnifiedFuture
 from vsengine.policy import Policy
 
@@ -282,6 +283,15 @@ def test_clean_help_formatter() -> None:
     with pytest.raises(SystemExit) as exc_info_serve:
         app(["serve", "--help"])
     assert exc_info_serve.value.code == 0
+
+    buf = io.StringIO()
+    c = Console(file=buf, color_system=None, width=120)
+    with pytest.raises(SystemExit) as exc_info_ping:
+        app(["ping", "--help"], console=c)
+    assert exc_info_ping.value.code == 0
+    ping_help = buf.getvalue()
+    assert "--address STR" in ping_help
+    assert "ADDRESS --address" not in ping_help
 
 
 @pytest.mark.vpy("initial-core")
