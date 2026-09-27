@@ -19,6 +19,7 @@ from cyclopts import App, Parameter
 from cyclopts.help import DefaultFormatter, HelpEntry, HelpPanel
 from rich.console import Console, ConsoleOptions
 from rich.live import Live
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -354,8 +355,8 @@ def keygen() -> None:
     Generate a new Curve25519 keypair for CurveZMQ transport encryption.
     """
     pub, sec = zmq.curve_keypair()
-    pub_str = pub.decode("ascii")
-    sec_str = sec.decode("ascii")
+    pub_str = escape(pub.decode("ascii"))
+    sec_str = escape(sec.decode("ascii"))
 
     console.print("[bold green]Generated CurveZMQ Keypair:[/bold green]\n")
     console.print(f"  [bold]Public Key:[/bold]  [cyan]{pub_str}[/cyan]")
