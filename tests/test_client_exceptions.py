@@ -211,34 +211,33 @@ def test_request_tracker_close_rejects_pending_with_transport_closed_error() -> 
 def test_create_remote_vnode_handshake_timeout_raises_remote_timeout_error(port: int) -> None:
     """Verify that get_output/create_remote_vnode raises RemoteTimeoutError if clip info times out over network."""
     # Start a raw ROUTER socket that accepts connection but drops all requests (simulating dead/hung server)
-    ctx = zmq.Context()
-    sock = ctx.socket(zmq.ROUTER)
-    sock.bind(f"tcp://127.0.0.1:{port}")
+    with (
+        zmq.Context() as ctx,
+        ctx.socket(zmq.ROUTER) as sock,
+        sock.bind(f"tcp://127.0.0.1:{port}"),
+        ClientTransport(f"tcp://127.0.0.1:{port}", startup_timeout=1.0) as trans,
+    ):
+        with pytest.raises(RemoteTimeoutError, match="Timed out fetching clip info for output 0") as exc_info:
+            create_remote_vnode(trans, output_index=0, compression="zstd", timeout=0.05)
 
-    try:
-        with ClientTransport(f"tcp://127.0.0.1:{port}", startup_timeout=1.0) as trans:
-            with pytest.raises(RemoteTimeoutError, match="Timed out fetching clip info for output 0") as exc_info:
-                create_remote_vnode(trans, output_index=0, compression="zstd", timeout=0.05)
-
-            assert isinstance(exc_info.value, TimeoutError)
-            assert isinstance(exc_info.value, TransportError)
-    finally:
-        sock.close(linger=0)
-        ctx.term()
+        assert isinstance(exc_info.value, TimeoutError)
+        assert isinstance(exc_info.value, TransportError)
 
 
 def test_client_get_outputs_timeout_raises_remote_timeout_error(port: int) -> None:
     """Verify that RemoteClient.get_outputs raises RemoteTimeoutError if list_outputs times out over network."""
 
-    with zmq.Context() as ctx, ctx.socket(zmq.ROUTER) as sock:
-        sock.bind(f"tcp://127.0.0.1:{port}")
+    with (
+        zmq.Context() as ctx,
+        ctx.socket(zmq.ROUTER) as sock,
+        sock.bind(f"tcp://127.0.0.1:{port}"),
+        RemoteClient(f"tcp://127.0.0.1:{port}", startup_timeout=1.0) as client,
+    ):
+        with pytest.raises(RemoteTimeoutError, match="Timed out listing outputs from remote server") as exc_info:
+            client.get_outputs(timeout=0.05)
 
-        with RemoteClient(f"tcp://127.0.0.1:{port}", startup_timeout=1.0) as client:
-            with pytest.raises(RemoteTimeoutError, match="Timed out listing outputs from remote server") as exc_info:
-                client.get_outputs(timeout=0.05)
-
-            assert isinstance(exc_info.value, TimeoutError)
-            assert isinstance(exc_info.value, TransportError)
+        assert isinstance(exc_info.value, TimeoutError)
+        assert isinstance(exc_info.value, TransportError)
 
 
 @pytest.mark.vpy("initial-core")
