@@ -531,6 +531,7 @@ def create_remote_vnode(
         prefetch: Number of subsequent frames to prefetch asynchronously ahead of time (0 to disable).
         backlog: Maximum number of in-flight and prefetched frame requests buffered
             (defaults to max(prefetch * 3, prefetch)).
+        timeout: Maximum time in seconds to wait for initial clip info and frame fetches (default: 30.0).
 
     Returns:
         A standard vs.VideoNode proxy.
