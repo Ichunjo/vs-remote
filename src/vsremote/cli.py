@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Annotated, override
 
 import msgspec
+import vapoursynth as vs
 import zmq
 from cyclopts import App, Parameter
 from cyclopts.help import DefaultFormatter, HelpEntry, HelpPanel
@@ -426,8 +427,23 @@ async def _wakeup() -> None:
 
 
 def _get_y4m_header(info: ClipInfo) -> bytes:
+    if info.color_family not in (vs.ColorFamily.GRAY, vs.ColorFamily.YUV):
+        raise UnsupportedFormatError(
+            f"Unsupported format for Y4M: {info.format_name} (Y4M only supports YUV and Gray formats)"
+        )
+
+    if info.sample_type != vs.SampleType.INTEGER:
+        raise UnsupportedFormatError(
+            f"Unsupported sample type for Y4M: {info.format_name} (Y4M only supports integer formats)"
+        )
+
+    if info.bits_per_sample not in (8, 9, 10, 12, 14, 16):
+        raise UnsupportedFormatError(
+            f"Unsupported bit depth for Y4M: {info.bits_per_sample} (Y4M only supports 8, 9, 10, 12, 14, 16 bits)"
+        )
+
     if info.num_planes == 1:
-        y4mformat = "mono"
+        y4mformat = "mono" if info.bits_per_sample == 8 else f"mono{info.bits_per_sample}"
     elif info.num_planes == 3:
         match info.subsampling_w, info.subsampling_h:
             case 1, 1:
@@ -446,11 +462,11 @@ def _get_y4m_header(info: ClipInfo) -> bytes:
                 raise UnsupportedFormatError(
                     f"Unsupported subsampling for Y4M: ({info.subsampling_w}, {info.subsampling_h})"
                 )
+
+        if info.bits_per_sample > 8:
+            y4mformat += f"p{info.bits_per_sample}"
     else:
         raise UnsupportedFormatError(f"Unsupported number of planes for Y4M: {info.num_planes}")
-
-    if (bits := info.bits_per_sample) > 8:
-        y4mformat += f"p{bits}"
 
     header = (
         f"YUV4MPEG2 C{y4mformat} W{info.width} H{info.height} "

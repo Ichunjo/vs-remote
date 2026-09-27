@@ -206,6 +206,8 @@ class ClipInfo(msgspec.Struct, frozen=True):
     bits_per_sample: int
     subsampling_w: int
     subsampling_h: int
+    sample_type: int
+    color_family: int
     planes: list[PlaneInfo]
     name: str = ""
 
@@ -229,6 +231,8 @@ class ClipInfo(msgspec.Struct, frozen=True):
             bits_per_sample=fmt.bits_per_sample,
             subsampling_w=fmt.subsampling_w,
             subsampling_h=fmt.subsampling_h,
+            sample_type=fmt.sample_type.value,
+            color_family=fmt.color_family.value,
             planes=PlaneInfo.from_clip(clip),
             name=name,
         )

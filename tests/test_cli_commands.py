@@ -140,6 +140,8 @@ def test_pipe_command_frame_error(monkeypatch: pytest.MonkeyPatch) -> None:
         bits_per_sample=8,
         subsampling_w=1,
         subsampling_h=1,
+        sample_type=vs.SampleType.INTEGER,
+        color_family=vs.ColorFamily.YUV,
         planes=[PlaneInfo(100, 100, 1, 10000), PlaneInfo(50, 50, 1, 2500), PlaneInfo(50, 50, 1, 2500)],
     )
     mock_info_fut.set_result(info_data)
@@ -196,7 +198,12 @@ def test_get_y4m_header_subsamplings() -> None:
     clip_gray10 = core.std.BlankClip(width=160, height=120, format=vs.GRAY10, length=5)
     info_gray10 = ClipInfo.from_clip(clip_gray10)
     h_gray10 = _get_y4m_header(info_gray10)
-    assert h_gray10.startswith(b"YUV4MPEG2 Cmonop10 W160 H120")
+    assert h_gray10.startswith(b"YUV4MPEG2 Cmono10 W160 H120")
+
+    clip_gray16 = core.std.BlankClip(width=160, height=120, format=vs.GRAY16, length=5)
+    info_gray16 = ClipInfo.from_clip(clip_gray16)
+    h_gray16 = _get_y4m_header(info_gray16)
+    assert h_gray16.startswith(b"YUV4MPEG2 Cmono16 W160 H120")
 
     # 3 planes: 420
     clip_420 = core.std.BlankClip(width=160, height=120, format=vs.YUV420P8, length=5)
@@ -228,32 +235,32 @@ def test_get_y4m_header_subsamplings() -> None:
     info_440 = ClipInfo.from_clip(clip_440)
     assert _get_y4m_header(info_440).startswith(b"YUV4MPEG2 C440 ")
 
-    # ManagedEnvironment as environment argument
-    assert _get_y4m_header(info_420).startswith(b"YUV4MPEG2 C420 ")
+    # High bit-depth YUV
+    clip_420p10 = core.std.BlankClip(width=160, height=120, format=vs.YUV420P10, length=5)
+    info_420p10 = ClipInfo.from_clip(clip_420p10)
+    assert _get_y4m_header(info_420p10).startswith(b"YUV4MPEG2 C420p10 ")
 
-    # None as environment argument
-    assert _get_y4m_header(info_420).startswith(b"YUV4MPEG2 C420 ")
 
-
+@pytest.mark.vpy("initial-core")
 def test_get_y4m_header_error_cases() -> None:
-    # Unsupported number of planes
-    info_2planes = ClipInfo(
-        width=100,
-        height=100,
-        fps_num=24,
-        fps_den=1,
-        num_frames=10,
-        format_id=int(vs.YUV420P8),
-        format_name="Test2Planes",
-        num_planes=2,
-        bytes_per_sample=1,
-        bits_per_sample=8,
-        subsampling_w=1,
-        subsampling_h=1,
-        planes=[],
-    )
-    with pytest.raises(UnsupportedFormatError, match="Unsupported number of planes for Y4M: 2"):
-        _get_y4m_header(info_2planes)
+    # Unsupported RGB format
+    clip_rgb24 = core.std.BlankClip(width=100, height=100, format=vs.RGB24, length=5)
+    with pytest.raises(UnsupportedFormatError, match="Y4M only supports YUV and Gray formats"):
+        _get_y4m_header(ClipInfo.from_clip(clip_rgb24))
+
+    # Unsupported floating-point format
+    clip_rgbs = core.std.BlankClip(width=100, height=100, format=vs.RGBS, length=5)
+    with pytest.raises(UnsupportedFormatError, match="Y4M only supports YUV and Gray formats"):
+        _get_y4m_header(ClipInfo.from_clip(clip_rgbs))
+
+    clip_yuv_float = core.std.BlankClip(width=100, height=100, format=vs.YUV420PS, length=5)
+    with pytest.raises(UnsupportedFormatError, match="Y4M only supports integer formats"):
+        _get_y4m_header(ClipInfo.from_clip(clip_yuv_float))
+
+    # Unsupported bit depth
+    clip_gray32 = core.std.BlankClip(width=100, height=100, format=vs.GRAY32, length=5)
+    with pytest.raises(UnsupportedFormatError, match="Unsupported bit depth for Y4M: 32"):
+        _get_y4m_header(ClipInfo.from_clip(clip_gray32))
 
     # Unsupported subsampling for 3 planes
     info_bad_sub = ClipInfo(
@@ -269,6 +276,8 @@ def test_get_y4m_header_error_cases() -> None:
         bits_per_sample=8,
         subsampling_w=3,
         subsampling_h=3,
+        sample_type=vs.SampleType.INTEGER,
+        color_family=vs.ColorFamily.YUV,
         planes=[],
     )
     with pytest.raises(UnsupportedFormatError, match=r"Unsupported subsampling for Y4M: \(3, 3\)"):
