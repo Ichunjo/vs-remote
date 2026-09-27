@@ -183,11 +183,16 @@ def serve(
 
 
 @app.command
-def ping(config: ClientConfig = DEFAULT_CLIENT_CONFIG) -> None:
-    """Check connectivity and liveness to a remote vs-remote server."""
+def ping(config: ClientConfig = DEFAULT_CLIENT_CONFIG, timeout: float = 10.0) -> None:
+    """
+    Check connectivity and liveness to a remote vs-remote server.
+
+    Args:
+        timeout: The number of seconds to wait for the ping result.
+    """
     with config.create_transport(subscribe_streams=False) as transport:
         t0 = time.perf_counter()
-        ok = transport.ping().result(timeout=10.0)
+        ok = transport.ping().result(timeout=timeout)
         lat = (time.perf_counter() - t0) * 1000.0
 
     if ok:
@@ -201,10 +206,15 @@ def ping(config: ClientConfig = DEFAULT_CLIENT_CONFIG) -> None:
 
 
 @app.command
-def info(config: ClientConfig = DEFAULT_CLIENT_CONFIG) -> None:
-    """Query and display metadata for all outputs available on the remote server."""
+def info(config: ClientConfig = DEFAULT_CLIENT_CONFIG, timeout: float = 10.0) -> None:
+    """
+    Query and display metadata for all outputs available on the remote server.
+
+    Args:
+        timeout: The number of seconds to wait for the info result.
+    """
     with config.create_transport(subscribe_streams=False) as transport:
-        outputs = transport.list_outputs().result(timeout=10.0)
+        outputs = transport.list_outputs().result(timeout=timeout)
 
     table = Table(title=f"Remote Outputs for {config.address}")
     table.add_column("Index", justify="right", style="cyan", no_wrap=True)
@@ -238,6 +248,7 @@ def pipe(
     prefetch: int = 8,
     backlog: int | None = None,
     compression: Compression = "zstd",
+    timeout: float = 10.0,
 ) -> None:
     """
     Stream video frames directly from the remote server to stdout in Y4M format or raw planes.
@@ -249,9 +260,10 @@ def pipe(
         backlog: Maximum number of in-flight and prefetched frame requests buffered
             (defaults to max(prefetch * 3, prefetch)).
         compression: Frame transport compression.
+        timeout: Maximum time in seconds to wait for operations.
     """
     with config.create_transport(subscribe_streams=False) as transport:
-        clip_info = transport.get_clip_info(output).result(timeout=10.0)
+        clip_info = transport.get_clip_info(output).result(timeout=timeout)
 
         stdout_buf = sys.stdout.buffer
 
@@ -278,7 +290,7 @@ def pipe(
             if (fut := inflight.pop(n, None)) is None:
                 fut = transport.request_frame(output, n, compression=compression)
 
-            header, plane_parts = fut.result(timeout=30.0)
+            header, plane_parts = fut.result(timeout=timeout)
 
             if header.status != StatusCode.OK:
                 header.status.raise_for_status(f"Failed to fetch frame {n}: {header.error_message}")
@@ -299,6 +311,7 @@ def top(
     *,
     interval: float = 1.0,
     json_output: Annotated[bool, Parameter("--json")] = False,
+    timeout: float = 3.0,
 ) -> None:
     """
     Monitor real-time performance, throughput, and memory metrics of a vs-remote server.
@@ -306,13 +319,14 @@ def top(
     Args:
         interval: Polling interval in seconds.
         json_output: Output a single JSON snapshot and exit.
+        timeout: Maximum time in seconds to wait for the stats result.
     """
     with (
         contextlib.suppress(KeyboardInterrupt),
         config.create_transport(subscribe_streams=False, default_client_id="top") as transport,
     ):
         if json_output:
-            stats = transport.get_stats().result(timeout=10.0)
+            stats = transport.get_stats().result(timeout=timeout)
             raw = msgspec.json.encode(stats)
             # Pretty-print formatted JSON
             parsed = json.loads(raw)
@@ -325,7 +339,7 @@ def top(
         with Live(console=console, screen=True, refresh_per_second=int(max(1.0 / interval, 2.0))) as live:
             while True:
                 try:
-                    stats = transport.get_stats().result(timeout=max(interval * 2.0, 3.0))
+                    stats = transport.get_stats().result(timeout=max(interval * 2.0, timeout))
                     last_known_stats = stats
                     error_msg = None
                 except TimeoutError:
