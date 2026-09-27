@@ -21,6 +21,7 @@ from rich.console import Console, ConsoleOptions
 from rich.live import Live
 from rich.markup import escape
 from rich.panel import Panel
+from rich.status import Status
 from rich.table import Table
 from rich.text import Text
 from vsengine import ManagedEnvironment, Policy, UnifiedFuture
@@ -337,6 +338,7 @@ def top(
         error_msg: str | None = None
 
         with Live(console=console, screen=True, refresh_per_second=int(max(1.0 / interval, 2.0))) as live:
+            live.update(Status("Starting top..."))
             while True:
                 try:
                     stats = transport.get_stats().result(timeout=max(interval * 2.0, timeout))
