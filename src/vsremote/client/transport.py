@@ -169,8 +169,6 @@ class ClientTransport:
             if not self._started and self._thread is None and self._event_thread is None:
                 return
 
-            self._running = False
-
             if self._startup_future and not self._startup_future.done():
                 self._startup_future.cancel()
 
@@ -201,7 +199,6 @@ class ClientTransport:
             self._event_thread = None
             self._event_queue = None
 
-            self._running = False
             logger.debug("Client transport closed")
 
     @overload
@@ -222,7 +219,7 @@ class ClientTransport:
         response_type: TypeForm[T],
     ) -> UnifiedFuture[ResponseEnvelope[T]]: ...
 
-    def send_request[T](
+    def send_request(
         self,
         cmd: Command,
         payload: Any = None,
