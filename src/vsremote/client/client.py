@@ -12,6 +12,7 @@ import vapoursynth as vs
 from vsengine.futures import UnifiedFuture
 
 from .._strides import copy_plane_strided
+from ..exceptions import RemoteTimeoutError, UnsupportedFormatError
 from ..protocol import (
     DEFAULT_ADDRESS,
     ClipInfo,
@@ -50,6 +51,7 @@ class RemoteClient:
         forward_logs: bool = True,
         subscribe_streams: bool = True,
         replay_history: bool = True,
+        startup_timeout: float = 5.0,
     ) -> None:
         ensure_vsengine_loop()
 
@@ -78,6 +80,7 @@ class RemoteClient:
             on_event=self._handle_event,
             subscribe_streams=subscribe_streams,
             replay_history=replay_history,
+            startup_timeout=startup_timeout,
         )
         self._streams = {"stdout": self.stdout, "stderr": self.stderr}
 
@@ -93,6 +96,21 @@ class RemoteClient:
     async def __aexit__(self, *args: object) -> None:
         self.close()
 
+    @property
+    def is_started(self) -> bool:
+        """Return True if the client transport has been started."""
+        return self.transport.is_started
+
+    @property
+    def is_running(self) -> bool:
+        """Return True if the client transport worker thread is running."""
+        return self.transport.is_running
+
+    @property
+    def is_closed(self) -> bool:
+        """Return True if the client transport is closed."""
+        return self.transport.is_closed
+
     def start(self) -> Self:
         """
         Start client connection and background transport.
@@ -101,6 +119,7 @@ class RemoteClient:
             The started RemoteClient instance.
 
         Raises:
+            TransportClosedError: If the client transport is closed.
             RemoteTimeoutError: If the background transport worker thread fails to initialize within timeout.
         """
         self.transport.start()
@@ -251,7 +270,13 @@ class RemoteClient:
         """
         return self.transport.request_frame(output_index, n, compression=self.compression)
 
-    def get_output(self, output_index: int = 0, prefetch: int = 4, backlog: int | None = None) -> vs.VideoNode:
+    def get_output(
+        self,
+        output_index: int = 0,
+        prefetch: int = 4,
+        backlog: int | None = None,
+        timeout: float = 30.0,
+    ) -> vs.VideoNode:
         """
         Create a local VideoNode proxy mirroring a remote output clip.
 
@@ -260,6 +285,7 @@ class RemoteClient:
             prefetch: Number of subsequent frames to prefetch asynchronously ahead of time (0 to disable).
             backlog: Maximum number of in-flight and prefetched frame requests buffered
                 (defaults to max(prefetch * 3, prefetch)).
+            timeout: Maximum time in seconds to wait for initial clip info and frame fetches (default: 30.0).
 
         Returns:
             A vs.VideoNode that lazily requests and renders frames from the server.
@@ -286,9 +312,15 @@ class RemoteClient:
             compression=self.compression,
             prefetch=prefetch,
             backlog=backlog,
+            timeout=timeout,
         )
 
-    def get_outputs(self, prefetch: int = 4, backlog: int | None = None) -> dict[int, vs.VideoNode]:
+    def get_outputs(
+        self,
+        prefetch: int = 4,
+        backlog: int | None = None,
+        timeout: float = 30.0,
+    ) -> dict[int, vs.VideoNode]:
         """
         Create local VideoNode proxies for all available outputs on the remote server.
 
@@ -296,6 +328,7 @@ class RemoteClient:
             prefetch: Number of subsequent frames to prefetch asynchronously ahead of time (0 to disable).
             backlog: Maximum number of in-flight and prefetched frame requests buffered
                 (defaults to max(prefetch * 3, prefetch)).
+            timeout: Maximum time in seconds to wait for operations (default: 30.0).
 
         Returns:
             A dictionary mapping output index to its corresponding vs.VideoNode proxy.
@@ -308,8 +341,14 @@ class RemoteClient:
             TransportClosedError: If the transport is closed.
             UnsupportedFormatError: If an output clip has variable format or an unsupported layout.
         """
-        outputs = self.list_outputs().result(timeout=30.0)
-        return {item.index: self.get_output(item.index, prefetch=prefetch, backlog=backlog) for item in outputs}
+        try:
+            outputs = self.list_outputs().result(timeout=timeout)
+        except TimeoutError as exc:
+            raise RemoteTimeoutError("Timed out listing outputs from remote server") from exc
+        return {
+            item.index: self.get_output(item.index, prefetch=prefetch, backlog=backlog, timeout=timeout)
+            for item in outputs
+        }
 
     def _handle_event(self, event: StreamEvent) -> None:
         match event:
@@ -362,6 +401,8 @@ def source(
     forward_logs: bool = True,
     subscribe_streams: bool = True,
     replay_history: bool = True,
+    timeout: float = 30.0,
+    startup_timeout: float = 5.0,
 ) -> vs.VideoNode: ...
 @overload
 def source(
@@ -388,6 +429,8 @@ def source(
     forward_logs: bool = True,
     subscribe_streams: bool = True,
     replay_history: bool = True,
+    timeout: float = 30.0,
+    startup_timeout: float = 5.0,
 ) -> vs.VideoNode:
     """
     Connect to a remote vs-remote server and mirror a video output as a local VideoNode.
@@ -414,6 +457,8 @@ def source(
         forward_logs: Whether to dispatch remote LogRecords to client logging system.
         subscribe_streams: Whether to subscribe to remote streams.
         replay_history: Whether to replay historical startup logs upon subscribing.
+        timeout: Maximum time in seconds to wait for initial clip info and frame fetches (default: 30.0).
+        startup_timeout: Maximum time in seconds to wait for transport initialization (default: 5.0).
 
     Returns:
         A vs.VideoNode that fetches frames on demand over the network.
@@ -446,6 +491,7 @@ def source(
             forward_logs=forward_logs,
             subscribe_streams=subscribe_streams,
             replay_history=replay_history,
+            startup_timeout=startup_timeout,
         )
         trans = client.transport
         trans.start()
@@ -459,6 +505,7 @@ def source(
         compression=compression,
         prefetch=prefetch,
         backlog=backlog,
+        timeout=timeout,
     )
 
 
@@ -468,6 +515,7 @@ def create_remote_vnode(
     compression: Compression,
     prefetch: int = 4,
     backlog: int | None = None,
+    timeout: float = 30.0,
 ) -> vs.VideoNode:
     """
     Construct a VapourSynth VideoNode that lazily requests and renders frames from a remote server.
@@ -499,7 +547,13 @@ def create_remote_vnode(
         RemoteTimeoutError: If frame retrieval times out (30s).
         TransportClosedError: If the transport connection was severed during frame retrieval.
     """
-    info = transport.get_clip_info(output_index).result(timeout=30.0)
+    try:
+        info = transport.get_clip_info(output_index).result(timeout=timeout)
+    except TimeoutError as exc:
+        raise RemoteTimeoutError(f"Timed out fetching clip info for output {output_index}") from exc
+
+    if not info.format_id:
+        raise UnsupportedFormatError(f"Remote output {output_index} has unsupported variable format")
 
     blank = core.std.BlankClip(
         width=info.width,
@@ -543,7 +597,10 @@ def create_remote_vnode(
                     if next_n not in inflight:
                         inflight[next_n] = transport.request_frame(output_index, next_n, compression=compression)
 
-        header, plane_parts = fut.result(timeout=30.0)
+        try:
+            header, plane_parts = fut.result(timeout=timeout)
+        except TimeoutError as exc:
+            raise RemoteTimeoutError(f"Timed out fetching remote frame (n={n}, output={output_index})") from exc
 
         if header.status != StatusCode.OK:
             header.status.raise_for_status(

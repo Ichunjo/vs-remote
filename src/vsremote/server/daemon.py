@@ -20,7 +20,7 @@ import zmq.asyncio
 import zmq.utils.z85
 from vsengine.vpy import ExecutionError
 
-from ..exceptions import EnvironmentNotSetError, TransportClosedError
+from ..exceptions import EnvironmentNotSetError, ScriptNotLoadedError, TransportClosedError
 from ..protocol import (
     DEFAULT_ADDRESS,
     CancelRequest,
@@ -574,6 +574,11 @@ class ServerDaemon:
         try:
             outputs = await loop.run_in_executor(self._executor, action, payload)
             await self._send_reply(req, StatusCode.OK, pack_payload(outputs))
+        except (FileNotFoundError, ScriptNotLoadedError) as e:
+            logger.debug("%s: %s", error_context, e)
+            payload = _build_error_payload(e)
+            await loop.run_in_executor(self._executor, self.runner.teardown_environment)
+            await self._send_error(req, StatusCode.NOT_FOUND, payload)
         except ExecutionError as e:
             logger.debug("%s: %s", error_context, e)
             payload = _build_error_payload(e)

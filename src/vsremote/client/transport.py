@@ -68,6 +68,7 @@ class ClientTransport:
         on_event: Callable[[StreamEvent], None] | None = None,
         subscribe_streams: bool = True,
         replay_history: bool = True,
+        startup_timeout: float = 5.0,
     ) -> None:
         self._ctx: zmq.asyncio.Context | None = None
         self._socket: zmq.asyncio.Socket | None = None
@@ -81,8 +82,10 @@ class ClientTransport:
         self._running = False
         self._start_lock = threading.RLock()
         self._started = False
+        self._closed = False
         self._event_queue: queue.SimpleQueue[StreamEvent | None] | None = None
         self._event_thread: threading.Thread | None = None
+        self.startup_timeout = startup_timeout
 
         if (curve_public_key is None) != (curve_secret_key is None):
             raise ValueError("curve_public_key and curve_secret_key must both be specified for client authentication")
@@ -102,6 +105,21 @@ class ClientTransport:
         self.on_event = on_event
         self.subscribe_streams = subscribe_streams
         self.replay_history = replay_history
+
+    @property
+    def is_started(self) -> bool:
+        """Return True if the transport has been started."""
+        return self._started
+
+    @property
+    def is_running(self) -> bool:
+        """Return True if the transport worker thread is running."""
+        return self._running
+
+    @property
+    def is_closed(self) -> bool:
+        """Return True if the transport is closed."""
+        return self._closed
 
     def __enter__(self) -> Self:
         return self.start()
@@ -126,9 +144,12 @@ class ClientTransport:
             The connected ClientTransport instance.
 
         Raises:
+            TransportClosedError: If the transport is closed.
             RemoteTimeoutError: If the background worker thread fails to initialize within timeout (5s).
         """
         with self._start_lock:
+            if self._closed:
+                raise TransportClosedError("Cannot start a closed ClientTransport")
             if not self._started or not self._running:
                 self._start_worker_thread()
                 self._started = True
@@ -139,7 +160,13 @@ class ClientTransport:
     def close(self) -> None:
         """Close socket, cancel pending requests, and stop background transport thread."""
         with self._start_lock:
-            if not self._started and not self._running and self._thread is None and self._event_thread is None:
+            if self._closed:
+                return
+
+            self._closed = True
+            self._running = False
+
+            if not self._started and self._thread is None and self._event_thread is None:
                 return
 
             self._running = False
@@ -174,7 +201,6 @@ class ClientTransport:
             self._event_thread = None
             self._event_queue = None
 
-            self._started = False
             self._running = False
             logger.debug("Client transport closed")
 
@@ -221,11 +247,14 @@ class ClientTransport:
             MalformedMessageError: If the server response cannot be framed.
             UnknownStatusCodeError: If the server returns an unrecognized status code byte.
         """
+        if self._closed:
+            return UnifiedFuture.reject(TransportClosedError("ClientTransport is closed"))
+
         if not self._started:
             return UnifiedFuture.reject(TransportNotStartedError("Transport is not started"))
 
         if not self._running:
-            return UnifiedFuture.reject(TransportClosedError("ClientTransport is closed"))
+            return UnifiedFuture.reject(TransportNotConnectedError("Transport is not connected"))
 
         req_id, fut = self._tracker.allocate(response_type)
 
@@ -472,7 +501,7 @@ class ClientTransport:
         self._thread.start()
 
         try:
-            self._startup_future.result(timeout=5.0)
+            self._startup_future.result(timeout=self.startup_timeout)
         except TimeoutError as exc:
             self.close()
             raise RemoteTimeoutError("Timed out waiting for transport worker thread to initialize") from exc
@@ -499,7 +528,9 @@ class ClientTransport:
             else:
                 logger.exception("Unhandled exception in transport worker thread")
         finally:
+            self._running = False
             self._loop = None
+            self._send_queue = None
 
     async def _async_worker(self) -> None:
         self._loop = asyncio.get_running_loop()
@@ -622,6 +653,8 @@ class ClientTransport:
             self._ctx = None
 
     def _send_message(self, req_id: int, cmd: Command, payload_bytes: bytes) -> None:
+        if self._closed:
+            raise TransportClosedError("ClientTransport is closed")
         if not self._started:
             raise TransportNotStartedError("Transport is not started")
         if not self._running or self._loop is None or self._send_queue is None:
@@ -713,7 +746,7 @@ class RequestTracker:
         return False
 
     def close(self, exc: BaseException | None = None) -> None:
-        error = exc if exc is not None else ConnectionResetError("Transport closed")
+        error = exc if exc is not None else TransportClosedError("ClientTransport is closed")
         with self._lock:
             for entry in self._pending.values():
                 entry.reject(error)

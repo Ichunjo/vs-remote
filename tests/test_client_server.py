@@ -26,6 +26,8 @@ from vsremote.exceptions import (
     EnvironmentNotSetError,
     OutputNotFoundError,
     RemoteAuthenticationError,
+    RemoteExecutionError,
+    RemoteNotFoundError,
     RemotePermissionError,
     ScriptNotLoadedError,
     TransportClosedError,
@@ -208,7 +210,7 @@ def test_error_handling_out_of_bounds(running_server: tuple[str, int]) -> None:
         assert "Invalid frame number" in header.error_message
 
         # Server-side invalid output index error
-        with pytest.raises(KeyError, match="not found"):
+        with pytest.raises(RemoteNotFoundError, match="not found"):
             client.get_clip_info(output_index=999).result()
 
 
@@ -659,7 +661,7 @@ async def test_client_load_code_and_error_handling(server: ServerFactory) -> Non
         assert header.status == StatusCode.OK
 
         # Execute invalid code - should return error without crashing server
-        with pytest.raises(RuntimeError, match="Failed to load code"):
+        with pytest.raises(RemoteExecutionError, match="Failed to load code"):
             await client.load_code("this is not valid python code !!!")
 
         # Server remains healthy and can execute subsequent code
@@ -701,7 +703,7 @@ async def test_client_load_script_switch(server: ServerFactory, tmp_path: Path) 
         assert outputs2[0].info.num_frames == 8
 
         # Try loading nonexistent script
-        with pytest.raises(RuntimeError, match="Failed to load script"):
+        with pytest.raises(RemoteNotFoundError, match="Failed to load script"):
             await client.load_script(tmp_path / "nonexistent.vpy")
 
 
@@ -924,16 +926,14 @@ def test_client_seeking_future_pruning(server: ServerFactory) -> None:
 
 def test_transport_error_states() -> None:
     trans = ClientTransport("tcp://127.0.0.1:5555")
-    # _send_message when not started
+    # send_request when not started
     with pytest.raises(TransportNotStartedError, match="Transport is not started"):
-        trans._send_message(1, Command.PING, b"")
+        trans.send_request(Command.PING).result()
 
-    # send_request when started but running is False
-    trans._started = True
-    trans._running = False
-    fut = trans.send_request(Command.PING)
+    # send_request when closed
+    trans.close()
     with pytest.raises(TransportClosedError, match="ClientTransport is closed"):
-        fut.result()
+        trans.send_request(Command.PING).result()
 
 
 def test_pending_entry_cancelled_race(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1128,7 +1128,7 @@ def test_transport_reload_failure_handling(server: ServerFactory, test_clip: vs.
     with (
         server([test_clip]) as (host, port),
         ClientTransport(f"tcp://{host}:{port}") as trans,
-        pytest.raises(RuntimeError, match="Failed to reload script"),
+        pytest.raises(RemoteNotFoundError, match="Failed to reload script"),
     ):
         trans.reload().result()
 
