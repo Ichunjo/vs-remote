@@ -71,13 +71,22 @@ class ClientConfig:
     curve_secret_key: Annotated[str | None, Parameter(env_var="VSREMOTE_CURVE_SECRET_KEY")] = None
     """Optional CurveZMQ client secret key."""
 
-    def create_transport(self, *, subscribe_streams: bool = False) -> ClientTransport:
+    client_id: Annotated[str | None, Parameter(env_var="VSREMOTE_CLIENT_ID")] = None
+    """Optional human-readable identity for this client (e.g. 'worker-1' or 'encoder')."""
+
+    def create_transport(
+        self,
+        *,
+        subscribe_streams: bool = False,
+        default_client_id: str | None = None,
+    ) -> ClientTransport:
         return ClientTransport(
             self.address,
             auth_token=self.auth_token,
             curve_server_key=self.curve_server_key,
             curve_public_key=self.curve_public_key,
             curve_secret_key=self.curve_secret_key,
+            client_id=self.client_id or default_client_id,
             subscribe_streams=subscribe_streams,
         )
 
@@ -297,7 +306,10 @@ def top(
         interval: Polling interval in seconds.
         json_output: Output a single JSON snapshot and exit.
     """
-    with contextlib.suppress(KeyboardInterrupt), config.create_transport(subscribe_streams=False) as transport:
+    with (
+        contextlib.suppress(KeyboardInterrupt),
+        config.create_transport(subscribe_streams=False, default_client_id="top") as transport,
+    ):
         if json_output:
             stats = transport.get_stats().result(timeout=10.0)
             raw = msgspec.json.encode(stats)

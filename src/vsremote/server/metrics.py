@@ -70,7 +70,14 @@ class ServerMetricsCollector:
         with self._lock:
             session = self._clients.get(identity)
             if session is None:
-                id_str = identity.hex() if identity else "unknown"
+                if not identity:
+                    id_str = "unknown"
+                else:
+                    try:
+                        decoded = identity.decode("utf-8")
+                        id_str = decoded if decoded.isprintable() else identity.hex()
+                    except UnicodeDecodeError:
+                        id_str = identity.hex()
                 session = ClientSession(identity_bytes=identity, identity_str=id_str)
                 self._clients[identity] = session
             session.active_requests += 1

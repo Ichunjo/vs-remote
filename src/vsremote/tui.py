@@ -239,7 +239,7 @@ def build_dashboard(stats: ServerStats, address: str, interval: float, status_ms
 
     # 4. Connected Clients Table (box.SIMPLE_HEAD)
     client_table = Table(box=box.SIMPLE_HEAD, expand=True, padding=(0, 1))
-    client_table.add_column("Identity", style="bold cyan", width=24)
+    client_table.add_column("Identity", style="bold cyan", ratio=2, no_wrap=True, overflow="ellipsis")
     client_table.add_column("Active Requests", justify="right", style="yellow", width=16)
     client_table.add_column("Lifetime Requests", justify="right", style="white", width=18)
     client_table.add_column("Last Seen", justify="right", style="dim")
@@ -251,7 +251,7 @@ def build_dashboard(stats: ServerStats, address: str, interval: float, status_ms
             idle_str = f"{_format_uptime(cl.last_active_seconds_ago)} ago"
 
         client_table.add_row(
-            cl.identity[:20] + "..." if len(cl.identity) > 23 else cl.identity,
+            cl.identity,
             str(cl.active_requests),
             f"{cl.total_requests:,}",
             idle_str,

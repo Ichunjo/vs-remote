@@ -75,8 +75,17 @@ def test_metrics_collector_unit() -> None:
     assert snap1.avg_render_time_ms == 10.0
     assert snap1.avg_compress_time_ms == 2.0
     assert len(snap1.active_clients) == 1
+    assert snap1.active_clients[0].identity == "client_1"
     assert snap1.active_clients[0].total_requests == 1
     assert snap1.active_clients[0].active_requests == 0
+
+    # Test binary non-printable identity falls back to hex
+    raw_binary_ident = b"\x00\x12\x34\xab\xcd"
+    collector.on_request_start(raw_binary_ident)
+    snap2 = collector.snapshot(active_script=None, outputs=(), compression_mode="zstd", in_flight_requests=0)
+    binary_client = next(c for c in snap2.active_clients if c.identity == "001234abcd")
+    assert binary_client.active_requests == 1
+    collector.on_request_end(raw_binary_ident)
 
     # Test build_dashboard renders without error (both normal and reconnecting alert states)
     layout = build_dashboard(snap1, "tcp://127.0.0.1:5555", 1.0)
@@ -104,8 +113,8 @@ def test_metrics_integration(
     with server(script_file, compression="zstd", environment=vpy_policy) as (host, port):
         address = f"tcp://{host}:{port}"
 
-        # 1. Test get_stats via ClientTransport
-        with ClientTransport(address, subscribe_streams=False) as transport:
+        # 1. Test get_stats via ClientTransport with custom client_id
+        with ClientTransport(address, client_id="test_worker#1", subscribe_streams=False) as transport:
             stats = transport.get_stats().result(timeout=5.0)
             assert isinstance(stats, ServerStats)
             assert stats.num_outputs == 1
@@ -119,6 +128,7 @@ def test_metrics_integration(
             assert stats_after.completed_frames >= 1
             assert stats_after.total_compressed_bytes > 0
             assert stats_after.total_uncompressed_bytes > 0
+            assert any(c.identity == "test_worker#1" for c in stats_after.active_clients)
 
         # 2. Test get_stats via RemoteClient
         with RemoteClient(address, subscribe_streams=False) as client:

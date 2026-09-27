@@ -44,6 +44,7 @@ class RemoteClient:
         curve_server_key: str | bytes | None = None,
         curve_public_key: str | bytes | None = None,
         curve_secret_key: str | bytes | None = None,
+        client_id: str | None = None,
         stdout: TextIO | None = sys.stdout,
         stderr: TextIO | None = sys.stderr,
         forward_logs: bool = True,
@@ -61,6 +62,7 @@ class RemoteClient:
         self.curve_server_key = curve_server_key
         self.curve_public_key = curve_public_key
         self.curve_secret_key = curve_secret_key
+        self.client_id = client_id
         self.stdout = stdout
         self.stderr = stderr
         self.forward_logs = forward_logs
@@ -72,6 +74,7 @@ class RemoteClient:
             curve_server_key=curve_server_key,
             curve_public_key=curve_public_key,
             curve_secret_key=curve_secret_key,
+            client_id=client_id,
             on_event=self._handle_event,
             subscribe_streams=subscribe_streams,
             replay_history=replay_history,

@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import platform
 import queue
+import secrets
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future
@@ -62,6 +64,7 @@ class ClientTransport:
         curve_server_key: str | bytes | None = None,
         curve_public_key: str | bytes | None = None,
         curve_secret_key: str | bytes | None = None,
+        client_id: str | None = None,
         on_event: Callable[[StreamEvent], None] | None = None,
         subscribe_streams: bool = True,
         replay_history: bool = True,
@@ -95,6 +98,7 @@ class ClientTransport:
         self.curve_server_key = validate_curve_key(curve_server_key, "curve_server_key")
         self.curve_public_key = validate_curve_key(curve_public_key, "curve_public_key")
         self.curve_secret_key = validate_curve_key(curve_secret_key, "curve_secret_key")
+        self.client_id = client_id
         self.on_event = on_event
         self.subscribe_streams = subscribe_streams
         self.replay_history = replay_history
@@ -530,6 +534,15 @@ class ClientTransport:
         try:
             socket = ctx.socket(zmq.DEALER)
             socket.setsockopt(zmq.LINGER, 0)
+
+            if self.client_id:
+                client_str = self.client_id.strip()
+                routing_id_str = client_str if "#" in client_str else f"{client_str}#{secrets.token_hex(2)}"
+            else:
+                hostname = (platform.node() or "client").split(".")[0]
+                routing_id_str = f"{hostname}:{os.getpid()}#{secrets.token_hex(2)}"
+
+            socket.setsockopt(zmq.ROUTING_ID, routing_id_str.encode("utf-8")[:255])
 
             if self.curve_server_key:
                 socket.setsockopt(zmq.CURVE_SERVERKEY, self.curve_server_key)
