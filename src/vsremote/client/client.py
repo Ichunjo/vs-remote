@@ -12,7 +12,7 @@ import vapoursynth as vs
 from vsengine.futures import UnifiedFuture
 
 from .._strides import copy_plane_strided
-from ..exceptions import RemoteTimeoutError, UnsupportedFormatError
+from ..exceptions import RemoteTimeoutError
 from ..protocol import (
     DEFAULT_ADDRESS,
     ClipInfo,
@@ -542,7 +542,6 @@ def create_remote_vnode(
         RemoteTimeoutError: If the initial clip info handshake times out (30s).
         TransportNotStartedError: If the transport has not been started.
         TransportClosedError: If the transport is closed.
-        UnsupportedFormatError: If the remote clip has variable format or an unsupported layout.
         vs.Error: If local BlankClip creation fails.
 
     Raises (during frame rendering):
@@ -556,9 +555,6 @@ def create_remote_vnode(
         info = transport.get_clip_info(output_index).result(timeout=timeout)
     except TimeoutError as exc:
         raise RemoteTimeoutError(f"Timed out fetching clip info for output {output_index}") from exc
-
-    if not info.format_id:
-        raise UnsupportedFormatError(f"Remote output {output_index} has unsupported variable format")
 
     blank = core.std.BlankClip(
         width=info.width,

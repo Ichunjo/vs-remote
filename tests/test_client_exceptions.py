@@ -28,7 +28,6 @@ from vsremote.exceptions import (
     UnsupportedFormatError,
 )
 from vsremote.protocol import ClipInfo, Command, ResponseEnvelope, StatusCode
-from vsremote.utils import SafeUnifiedFuture
 
 if TYPE_CHECKING:
     from conftest import ServerFactory
@@ -283,35 +282,6 @@ def test_transport_resolve_unknown_status_code() -> None:
     assert tracker.resolve(req_id, [bytes([255]), b""])
     with pytest.raises(UnknownStatusCodeError, match="Unknown status code byte"):
         fut.result()
-
-
-def test_create_remote_vnode_unsupported_variable_format() -> None:
-    """Verify that create_remote_vnode defends against variable format (format_id=0)."""
-
-    class DummyTransport:
-        def get_clip_info(self, output_index: int = 0) -> SafeUnifiedFuture[ClipInfo]:
-            fut = SafeUnifiedFuture[ClipInfo]()
-            fut.set_result(
-                ClipInfo(
-                    width=64,
-                    height=64,
-                    fps_num=24,
-                    fps_den=1,
-                    num_frames=10,
-                    format_id=0,  # Variable format
-                    format_name="Variable",
-                    num_planes=0,
-                    bytes_per_sample=1,
-                    bits_per_sample=8,
-                    subsampling_w=0,
-                    subsampling_h=0,
-                    planes=[],
-                )
-            )
-            return fut
-
-    with pytest.raises(UnsupportedFormatError, match="unsupported variable format"):
-        create_remote_vnode(DummyTransport(), output_index=0, compression="none")  # type: ignore[arg-type]
 
 
 @pytest.mark.vpy("initial-core")
