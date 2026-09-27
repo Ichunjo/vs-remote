@@ -113,8 +113,8 @@ def serve(
         Parameter(env_var="VSREMOTE_CURVE_ALLOWED_KEYS", consume_multiple=True),
     ] = None,
     # Not exposed to the CLI
-    ready_event: Annotated[threading.Event | None, Parameter(show=False)] = None,
-    stop_event: Annotated[threading.Event | None, Parameter(show=False)] = None,
+    ready_event: Annotated[threading.Event | asyncio.Event | None, Parameter(show=False)] = None,
+    stop_event: Annotated[threading.Event | asyncio.Event | None, Parameter(show=False)] = None,
     environment: Annotated[Policy | ManagedEnvironment | None, Parameter(show=False)] = None,
 ) -> None:
     """
@@ -397,7 +397,7 @@ def main() -> None:
     app.meta()
 
 
-async def _watch_stop(daemon: ServerDaemon, stop_event: threading.Event) -> None:
+async def _watch_stop(daemon: ServerDaemon, stop_event: threading.Event | asyncio.Event) -> None:
     while not stop_event.is_set():  # noqa: ASYNC110
         await asyncio.sleep(0.5)
     await daemon.stop()
