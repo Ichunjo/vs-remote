@@ -396,6 +396,7 @@ def source(
     curve_server_key: str | bytes | None = None,
     curve_public_key: str | bytes | None = None,
     curve_secret_key: str | bytes | None = None,
+    client_id: str | None = None,
     stdout: TextIO | None = sys.stdout,
     stderr: TextIO | None = sys.stderr,
     forward_logs: bool = True,
@@ -424,6 +425,7 @@ def source(
     curve_server_key: str | bytes | None = None,
     curve_public_key: str | bytes | None = None,
     curve_secret_key: str | bytes | None = None,
+    client_id: str | None = None,
     stdout: TextIO | None = sys.stdout,
     stderr: TextIO | None = sys.stderr,
     forward_logs: bool = True,
@@ -452,6 +454,7 @@ def source(
         curve_server_key: Optional CurveZMQ server public key for end-to-end encryption.
         curve_public_key: Optional CurveZMQ client public key.
         curve_secret_key: Optional CurveZMQ client secret key.
+        client_id: Human-readable identity for this client (e.g. 'worker-1' or 'encoder')
         stdout: Target stream or callable for remote stdout.
         stderr: Target stream or callable for remote stderr.
         forward_logs: Whether to dispatch remote LogRecords to client logging system.
@@ -486,6 +489,7 @@ def source(
             curve_server_key=curve_server_key,
             curve_public_key=curve_public_key,
             curve_secret_key=curve_secret_key,
+            client_id=client_id,
             stdout=stdout,
             stderr=stderr,
             forward_logs=forward_logs,
