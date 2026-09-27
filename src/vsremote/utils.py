@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import InvalidStateError
 from logging import getLogger
 
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.text import Text
+from vsengine import UnifiedFuture
 from vsengine.adapters.asyncio import AsyncIOLoop
 from vsengine.loops import NO_LOOP, get_loop, set_loop
 
@@ -32,3 +34,19 @@ def setup_logging(level: int) -> None:
 
     if not root_logger.handlers:
         root_logger.addHandler(handler)
+
+
+class SafeUnifiedFuture[T](UnifiedFuture[T]):
+    def try_set_result(self, result: T) -> bool:
+        try:
+            self.set_result(result)
+            return True
+        except InvalidStateError:
+            return False
+
+    def try_set_exception(self, exc: BaseException) -> bool:
+        try:
+            self.set_exception(exc)
+            return True
+        except InvalidStateError:
+            return False

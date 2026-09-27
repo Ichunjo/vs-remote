@@ -46,6 +46,7 @@ from ..protocol import (
     unpack_payload,
     validate_curve_key,
 )
+from ..utils import SafeUnifiedFuture
 
 logger = getLogger(__name__)
 
@@ -73,7 +74,7 @@ class ClientTransport:
         self._tracker = RequestTracker()
 
         self._thread: threading.Thread | None = None
-        self._startup_future: UnifiedFuture[None] | None = None
+        self._startup_future: SafeUnifiedFuture[None] | None = None
         self._running = False
         self._start_lock = threading.RLock()
         self._started = False
@@ -235,7 +236,7 @@ class ClientTransport:
             self._send_message(req_id, cmd, payload_bytes)
         except Exception as exc:
             self._tracker.pop(req_id)
-            fut.set_exception(exc)
+            fut.try_set_exception(exc)
 
         return fut
 
@@ -462,7 +463,7 @@ class ClientTransport:
             self._event_thread = threading.Thread(None, self._event_worker, name="VSRemoteEventDispatcher", daemon=True)
             self._event_thread.start()
 
-        self._startup_future = UnifiedFuture()
+        self._startup_future = SafeUnifiedFuture()
         self._thread = threading.Thread(target=self._worker, name="VSRemoteTransport", daemon=True)
         self._thread.start()
 
@@ -490,7 +491,7 @@ class ClientTransport:
             asyncio.run(self._async_worker(), loop_factory=asyncio.SelectorEventLoop)
         except BaseException as exc:
             if self._startup_future and not self._startup_future.done():
-                self._startup_future.set_exception(exc)
+                self._startup_future.try_set_exception(exc)
             else:
                 logger.exception("Unhandled exception in transport worker thread")
         finally:
@@ -505,10 +506,10 @@ class ClientTransport:
                 self._cleanup_resources()
                 return
             self._running = True
-            self._startup_future.set_result(None)
+            self._startup_future.try_set_result(None)
         except BaseException as exc:
             if self._startup_future and not self._startup_future.done():
-                self._startup_future.set_exception(exc)
+                self._startup_future.try_set_exception(exc)
             self._cleanup_resources()
             return
 
@@ -631,20 +632,23 @@ class ClientTransport:
 
 
 class PendingEntry(NamedTuple):
-    future: UnifiedFuture[ResponseEnvelope[Any]]
+    future: SafeUnifiedFuture[ResponseEnvelope[Any]]
     response_type: Any | None
 
     def resolve(self, frames: list[bytes]) -> None:
         if self.future.done():
             return
         try:
-            self.future.set_result(ResponseEnvelope.from_frames(frames, self.response_type))
+            envelope = ResponseEnvelope.from_frames(frames, self.response_type)
         except Exception as exc:
-            self.future.set_exception(exc)
+            self.future.try_set_exception(exc)
+            return
+
+        self.future.try_set_result(envelope)
 
     def reject(self, exc: BaseException) -> None:
         if not self.future.done():
-            self.future.set_exception(exc)
+            self.future.try_set_exception(exc)
 
     def cancel(self) -> None:
         if not self.future.done():
@@ -657,8 +661,10 @@ class RequestTracker:
         self._next_id = 1
         self._lock = threading.Lock()
 
-    def allocate[T](self, response_type: TypeForm[T] | None = None) -> tuple[int, UnifiedFuture[ResponseEnvelope[T]]]:
-        fut = UnifiedFuture[ResponseEnvelope[T]]()
+    def allocate[T](
+        self, response_type: TypeForm[T] | None = None
+    ) -> tuple[int, SafeUnifiedFuture[ResponseEnvelope[T]]]:
+        fut = SafeUnifiedFuture[ResponseEnvelope[T]]()
 
         with self._lock:
             req_id = self._next_id

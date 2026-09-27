@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, override
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,6 +21,7 @@ import zmq.asyncio
 from vsengine.policy import ManagedEnvironment, Policy
 
 from vsremote.client import ClientTransport, RemoteClient, source
+from vsremote.client.transport import PendingEntry
 from vsremote.exceptions import (
     EnvironmentNotSetError,
     OutputNotFoundError,
@@ -30,10 +31,18 @@ from vsremote.exceptions import (
     TransportClosedError,
     TransportNotStartedError,
 )
-from vsremote.protocol import Command, RemoteLogRecord, StatusCode, StreamEvent, StreamOutputEvent, pack_payload
+from vsremote.protocol import (
+    Command,
+    RemoteLogRecord,
+    ResponseEnvelope,
+    StatusCode,
+    StreamEvent,
+    StreamOutputEvent,
+    pack_payload,
+)
 from vsremote.server import LogForwarder, RemotePolicy, ScriptRunner, ServerDaemon
 from vsremote.server.daemon import _is_loopback_address
-from vsremote.utils import setup_logging
+from vsremote.utils import SafeUnifiedFuture, setup_logging
 
 if TYPE_CHECKING:
     from conftest import ServerFactory
@@ -925,6 +934,19 @@ def test_transport_error_states() -> None:
     fut = trans.send_request(Command.PING)
     with pytest.raises(TransportClosedError, match="ClientTransport is closed"):
         fut.result()
+
+
+def test_pending_entry_cancelled_race(monkeypatch: pytest.MonkeyPatch) -> None:
+    fut = SafeUnifiedFuture[ResponseEnvelope[Any]]()
+    entry = PendingEntry(fut, None)
+    fut.cancel()
+
+    # Simulate race condition where future was cancelled concurrently right after .done() check
+    monkeypatch.setattr(fut, "done", lambda: False)
+    entry.resolve([b"\x00", b""])
+    entry.resolve([])
+    entry.reject(RuntimeError("error"))
+    entry.cancel()
 
 
 @pytest.mark.asyncio(loop_factories=["custom"])
