@@ -571,24 +571,26 @@ class ServerDaemon:
 
         loop = asyncio.get_running_loop()
 
+        err: Exception | None = None
         try:
             outputs = await loop.run_in_executor(self._executor, action, payload)
-            await self._send_reply(req, StatusCode.OK, pack_payload(outputs))
+            return await self._send_reply(req, StatusCode.OK, pack_payload(outputs))
         except (FileNotFoundError, ScriptNotLoadedError) as e:
             logger.debug("%s: %s", error_context, e)
-            payload = _build_error_payload(e)
-            await loop.run_in_executor(self._executor, self.runner.teardown_environment)
-            await self._send_error(req, StatusCode.NOT_FOUND, payload)
+            status = StatusCode.NOT_FOUND
+            err = e
         except ExecutionError as e:
             logger.debug("%s: %s", error_context, e)
-            payload = _build_error_payload(e)
-            await loop.run_in_executor(self._executor, self.runner.teardown_environment)
-            await self._send_error(req, StatusCode.ERROR, payload)
+            status = StatusCode.ERROR
+            err = e
         except Exception as e:
             logger.exception(error_context)
-            payload = _build_error_payload(e)
-            await loop.run_in_executor(self._executor, self.runner.teardown_environment)
-            await self._send_error(req, StatusCode.ERROR, payload)
+            status = StatusCode.ERROR
+            err = e
+
+        payload = _build_error_payload(err)
+        await loop.run_in_executor(self._executor, self.runner.teardown_environment)
+        return await self._send_error(req, status, payload)
 
     async def _send_reply(
         self,
