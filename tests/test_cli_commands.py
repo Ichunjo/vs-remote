@@ -51,7 +51,7 @@ def test_cli_subcommands(
         capsys.readouterr()
 
         # Test ping command
-        ping(client_cfg)
+        ping(config=client_cfg)
         ping_err = capsys.readouterr().err
         assert "OK" in ping_err
         assert "Successfully connected to" in ping_err
@@ -59,7 +59,7 @@ def test_cli_subcommands(
         assert "RTT:" in ping_err
 
         # Test info command
-        info(client_cfg)
+        info(config=client_cfg)
         info_err = capsys.readouterr().err
         assert f"Remote Outputs for {address}" in info_err
         assert "Index" in info_err
@@ -78,7 +78,7 @@ def test_cli_subcommands(
         # Test pipe command with Y4M header
         buf = io.BytesIO()
         monkeypatch.setattr(sys.stdout, "buffer", buf)
-        pipe(client_cfg, output=0, y4m=True, prefetch=2)
+        pipe(config=client_cfg, output=0, y4m=True, prefetch=2)
 
         output_bytes = buf.getvalue()
         assert output_bytes.startswith(b"YUV4MPEG2 C420 W160 H120 F24:1 Ip A0:0 XLENGTH=3\n")
@@ -91,7 +91,7 @@ def test_cli_subcommands(
         # Test pipe command raw without Y4M header
         raw_buf = io.BytesIO()
         monkeypatch.setattr(sys.stdout, "buffer", raw_buf)
-        pipe(client_cfg, output=0, y4m=False, prefetch=2, backlog=4)
+        pipe(config=client_cfg, output=0, y4m=False, prefetch=2, backlog=4)
 
         raw_bytes = raw_buf.getvalue()
         assert not raw_bytes.startswith(b"YUV4MPEG2")
@@ -102,7 +102,7 @@ def test_cli_subcommands(
         # Test pipe command with prefetch=0
         zero_buf = io.BytesIO()
         monkeypatch.setattr(sys.stdout, "buffer", zero_buf)
-        pipe(client_cfg, output=0, y4m=False, prefetch=0)
+        pipe(config=client_cfg, output=0, y4m=False, prefetch=0)
         assert len(zero_buf.getvalue()) == expected_size
 
 
@@ -115,7 +115,7 @@ def test_ping_command_failure(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Ca
     monkeypatch.setattr(ClientTransport, "ping", lambda self: mock_fut)
 
     with pytest.raises(SystemExit) as exc_info:
-        ping(bad_cfg)
+        ping(config=bad_cfg)
     assert exc_info.value.code == 1
     err = capsys.readouterr().err
     assert "FAIL" in err
@@ -165,20 +165,20 @@ def test_pipe_command_frame_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ClientTransport, "request_frame", lambda self, output, n, compression="zstd": mock_frame_fut)
 
     with pytest.raises(RemoteExecutionError, match="Failed to fetch frame 0: Simulated frame rendering error"):
-        pipe(cfg, output=0)
+        pipe(config=cfg, output=0)
 
 
 def test_cli_dispatch_subcommands() -> None:
     """Test Cyclopts CLI parser dispatching to subcommands correctly."""
-    func, bound, _ = app.parse_args(["ping", "tcp://127.0.0.1:5555"])
+    func, bound, _ = app.parse_args(["ping", "--address", "tcp://127.0.0.1:5555"])
     assert func == ping
     assert bound.arguments["config"].address == "tcp://127.0.0.1:5555"
 
-    func, bound, _ = app.parse_args(["info", "tcp://127.0.0.1:5555"])
+    func, bound, _ = app.parse_args(["info", "--address", "tcp://127.0.0.1:5555"])
     assert func == info
     assert bound.arguments["config"].address == "tcp://127.0.0.1:5555"
 
-    func, bound, _ = app.parse_args(["pipe", "tcp://127.0.0.1:5555", "--output", "1"])
+    func, bound, _ = app.parse_args(["pipe", "--address", "tcp://127.0.0.1:5555", "--output", "1"])
     assert func == pipe
     assert bound.arguments["config"].address == "tcp://127.0.0.1:5555"
     assert bound.arguments["output"] == 1

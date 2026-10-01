@@ -139,7 +139,7 @@ def test_metrics_integration(
         # 3. Test CLI top --json
         capsys.readouterr()  # Flush
         client_cfg = ClientConfig(address=address)
-        top(client_cfg, json_output=True)
+        top(config=client_cfg, json_output=True)
         captured = capsys.readouterr()
 
         json_output = captured.out
