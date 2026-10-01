@@ -320,7 +320,7 @@ def top(
         last_known_stats: ServerStats | None = None
         error_msg: str | None = None
 
-        with Live(console=console, screen=True, refresh_per_second=int(max(1.0 / interval, 2.0))) as live:
+        with Live(console=console, screen=True, refresh_per_second=12.5) as live:
             live.update(Status("Starting top..."))
             while True:
                 try:
