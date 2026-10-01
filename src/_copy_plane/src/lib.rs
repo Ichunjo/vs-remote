@@ -37,15 +37,14 @@ fn copy_plane(
 
     py.detach(move || {
         let mut dst = dst_addr as *mut u8;
-        let src = decompressed.as_ptr();
+        let mut src = decompressed.as_ptr();
         if stride == row_size.cast_signed() {
             unsafe { copy_nonoverlapping(src, dst, row_size * height) };
         } else {
-            let mut src_ptr = src;
             for _ in 0..height {
                 unsafe {
-                    copy_nonoverlapping(src_ptr, dst, row_size);
-                    src_ptr = src_ptr.add(row_size);
+                    copy_nonoverlapping(src, dst, row_size);
+                    src = src.add(row_size);
                 }
                 dst = dst.wrapping_offset(stride);
             }
