@@ -14,14 +14,6 @@ jobs:
       os: ubuntu-slim
       dist: sdist
 
-  build-generic:
-    uses: ./.github/workflows/cd-build.yml
-    with:
-      python-versions: '["3.12"]'
-      os: ubuntu-slim
-      dist: wheel
-      pure-python: true
-
   build-windows:
     uses: ./.github/workflows/cd-build.yml
     with:
@@ -34,20 +26,33 @@ jobs:
       os: ubuntu-22.04
       dist: wheel
 
+  build-linux-aarch64:
+    uses: ./.github/workflows/cd-build.yml
+    with:
+      os: ubuntu-22.04-arm
+      dist: wheel
+
   build-macos:
     uses: ./.github/workflows/cd-build.yml
     with:
       os: macos-15
       dist: wheel
 
+  build-macos-intel:
+    uses: ./.github/workflows/cd-build.yml
+    with:
+      os: macos-15-intel
+      dist: wheel
+
   publish:
     name: Publish PyPI
     needs:
       - build-sdist
-      - build-generic
       - build-windows
       - build-linux
+      - build-linux-aarch64
       - build-macos
+      - build-macos-intel
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
 

@@ -814,15 +814,6 @@ wheels = [
 ]
 
 [[package]]
-name = "setuptools"
-version = "84.0.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/6d/44/f5da03a8ef95d369145c5bb53050e7877c9f3d312e128605fd9504829143/setuptools-84.0.0.tar.gz", hash = "sha256:f4695c21257f0d9b537ec2692c941d02ee143b7cc1276941349a546573b2ef73", size = 1168449, upload-time = "2026-08-08T18:27:58.365Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/95/9c/c510029fc6ef33a6275cd2c5d3cecd6613dfd6aa401d57c54f1c18852ccf/setuptools-84.0.0-py3-none-any.whl", hash = "sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670", size = 818216, upload-time = "2026-08-08T18:27:56.719Z" },
-]
-
-[[package]]
 name = "tomlkit"
 version = "0.15.1"
 source = { registry = "https://pypi.org/simple" }
@@ -841,30 +832,12 @@ wheels = [
 ]
 
 [[package]]
-name = "types-mypy-extensions"
-version = "1.1.0.20260724"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/3b/47/eb5c714ea440f00ddc8001ba2338d27b58d3b391ecf9ea3669141a41fc88/types_mypy_extensions-1.1.0.20260724.tar.gz", hash = "sha256:e60c3427b2241ae778626a49c50a2fd80888b5d0e8ac20b567b629f2c8fab87b", size = 10057, upload-time = "2026-07-24T04:57:58.535Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/fa/23/d19f66fcadd0483d8695727e14b4840355f4c5c3fc366e07e480106baec7/types_mypy_extensions-1.1.0.20260724-py3-none-any.whl", hash = "sha256:0aa41c33e09f567fa19be906a1f9d1a7b981ddac409efc9b2177109d0f6a1232", size = 8555, upload-time = "2026-07-24T04:57:57.682Z" },
-]
-
-[[package]]
 name = "types-psutil"
 version = "7.2.2.20260906"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/97/0a/f48b9b0ab5ba8599fd117309e345152bf82c756c72be2ff0f635780c2792/types_psutil-7.2.2.20260906.tar.gz", hash = "sha256:93abf22cf9a62b915f724e433bde702995ac274865425fd4a76d1d9b5828da1a", size = 27396, upload-time = "2026-09-06T06:35:24.499Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/eb/8d/81a86107486e1c23f5ca21bea1e9e5b18a50754242e7a0b82f41f9ae8384/types_psutil-7.2.2.20260906-py3-none-any.whl", hash = "sha256:db00baf7f96c3f63421c4d3d68d373923094a0dfddf13e922c5c5fbc42488159", size = 33383, upload-time = "2026-09-06T06:35:23.575Z" },
-]
-
-[[package]]
-name = "types-setuptools"
-version = "84.0.0.20260812"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/4f/cd/3b2a3362a526f91c33f785a291462b2ec448ae531101c62372fc30a21f53/types_setuptools-84.0.0.20260812.tar.gz", hash = "sha256:09bedc248ebbb7a232c9419dfcdca329706e61bf2aa5743e9424d027f1d956b4", size = 46545, upload-time = "2026-08-12T03:52:42.316Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8a/e5/3a41cab4066465593facd660b2683c017f3d88d3297cdd26db0677b8e479/types_setuptools-84.0.0.20260812-py3-none-any.whl", hash = "sha256:799c08e4bc6a288e8a0b538afb5f5ff320a08927ba8dbedb30c74ee3ba5d867b", size = 70320, upload-time = "2026-08-12T03:52:41.154Z" },
 ]
 
 [[package]]
@@ -958,10 +931,7 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
-    { name = "setuptools" },
-    { name = "types-mypy-extensions" },
     { name = "types-psutil" },
-    { name = "types-setuptools" },
     { name = "vsstubs" },
 ]
 
@@ -985,10 +955,7 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "ruff", specifier = "~=0.16.0" },
-    { name = "setuptools", specifier = ">=84.0.0" },
-    { name = "types-mypy-extensions", specifier = ">=1.1.0.20260724" },
     { name = "types-psutil", specifier = ">=7.0.0" },
-    { name = "types-setuptools", specifier = ">=84.0.0.20260812" },
     { name = "vsstubs", specifier = ">=2.3.0" },
 ]
 

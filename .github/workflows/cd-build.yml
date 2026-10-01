@@ -5,7 +5,7 @@ on:
       python-versions:
         required: false
         type: string
-        default: '["3.12", "3.13", "3.14", "3.15", "3.15t"]'
+        default: '["3.12", "3.15t"]'
       os:
         required: true
         type: string
@@ -13,10 +13,6 @@ on:
         description: "sdist or wheel"
         required: true
         type: string
-      pure-python:
-        required: false
-        type: boolean
-        default: false
 
 jobs:
   build:
@@ -42,16 +38,22 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Build ${{ inputs.dist }}
-        env:
-          VSREMOTE_BUILD_PURE_PYTHON: ${{ inputs.pure-python }}
         run: uv build --${{ inputs.dist }}
 
       - name: Repair wheel (Linux)
-        if: runner.os == 'Linux' && !inputs.pure-python && inputs.dist == 'wheel'
+        if: runner.os == 'Linux' && inputs.dist == 'wheel'
         run: |
           uvx --with patchelf auditwheel repair --strip dist/*.whl -w repaired_wheels
           rm dist/*.whl
           mv repaired_wheels/*.whl dist/
+
+      - name: Repair wheel (macOS)
+        if: runner.os == 'macOS' && inputs.dist == 'wheel'
+        run: |
+          uvx --from delocate delocate-wheel -v dist/*.whl -w repaired_wheels
+          rm dist/*.whl
+          mv repaired_wheels/*.whl dist/
+          uvx --from delocate delocate-listdeps dist/*.whl
 
       - name: Upload ${{ inputs.dist }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
