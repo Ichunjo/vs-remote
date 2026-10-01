@@ -11,14 +11,12 @@ import threading
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Annotated, override
+from typing import Annotated
 
 import msgspec
 import vapoursynth as vs
 import zmq
 from cyclopts import App, Parameter
-from cyclopts.help import DefaultFormatter, HelpEntry, HelpPanel
-from rich.console import Console, ConsoleOptions
 from rich.live import Live
 from rich.markup import escape
 from rich.panel import Panel
@@ -35,23 +33,7 @@ from .tui import build_dashboard
 from .utils import console, setup_logging
 
 logger = logging.getLogger(__name__)
-
-
-class CleanHelpFormatter(DefaultFormatter):
-    @override
-    def __call__(self, console: Console, options: ConsoleOptions, panel: HelpPanel) -> None:
-        cleaned_entries = list[HelpEntry]()
-        for entry in panel.entries:
-            if getattr(entry, "positional_label", None) and getattr(entry, "all_options", ()):
-                entry = entry.copy(positional_label=None)
-            if len(entry.positive_names) > 1 and not entry.positive_names[0].startswith("-"):
-                entry = entry.copy(positive_names=entry.positive_names[1:])
-            cleaned_entries.append(entry)
-        panel.entries = cleaned_entries
-        super().__call__(console, options, panel)
-
-
-app = App("vsremote", console=console, default_parameter=Parameter(negative=()), help_formatter=CleanHelpFormatter())
+app = App("vsremote", console=console, default_parameter=Parameter(negative=()))
 
 
 @Parameter(name="*")
@@ -185,7 +167,7 @@ def serve(
 
 
 @app.command
-def ping(config: ClientConfig = DEFAULT_CLIENT_CONFIG, timeout: float = 10.0) -> None:
+def ping(*, config: ClientConfig = DEFAULT_CLIENT_CONFIG, timeout: float = 10.0) -> None:
     """
     Check connectivity and liveness to a remote vs-remote server.
 
@@ -208,7 +190,7 @@ def ping(config: ClientConfig = DEFAULT_CLIENT_CONFIG, timeout: float = 10.0) ->
 
 
 @app.command
-def info(config: ClientConfig = DEFAULT_CLIENT_CONFIG, timeout: float = 10.0) -> None:
+def info(*, config: ClientConfig = DEFAULT_CLIENT_CONFIG, timeout: float = 10.0) -> None:
     """
     Query and display metadata for all outputs available on the remote server.
 
@@ -243,8 +225,8 @@ def info(config: ClientConfig = DEFAULT_CLIENT_CONFIG, timeout: float = 10.0) ->
 
 @app.command
 def pipe(
-    config: ClientConfig = DEFAULT_CLIENT_CONFIG,
     *,
+    config: ClientConfig = DEFAULT_CLIENT_CONFIG,
     output: int = 0,
     y4m: bool = False,
     prefetch: int = 8,
@@ -309,8 +291,8 @@ def pipe(
 
 @app.command
 def top(
-    config: ClientConfig = DEFAULT_CLIENT_CONFIG,
     *,
+    config: ClientConfig = DEFAULT_CLIENT_CONFIG,
     interval: float = 1.0,
     json_output: Annotated[bool, Parameter("--json")] = False,
     timeout: float = 3.0,
