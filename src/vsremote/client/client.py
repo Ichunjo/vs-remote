@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ctypes
 import logging
 import os
 import sys
@@ -11,7 +10,7 @@ from typing import Self, TextIO, assert_never, overload
 import vapoursynth as vs
 from vsengine.futures import UnifiedFuture
 
-from .._strides import copy_plane_strided
+from .._copy_plane import copy_plane
 from ..exceptions import RemoteTimeoutError
 from ..protocol import (
     DEFAULT_ADDRESS,
@@ -616,25 +615,15 @@ def create_remote_vnode(
         # Decompress and copy planar bytes into the frame buffer
         for p in range(info.num_planes):
             plane_info = info.planes[p]
-            decompressed = decompress_plane(plane_parts[p], plane_info.size_bytes, header.compression)
 
-            dst_ptr = f_out.get_write_ptr(p)
-            stride = f_out.get_stride(p)
-            row_size = plane_info.width * plane_info.bytes_per_sample
-
-            if stride == row_size:
-                ctypes.memmove(dst_ptr, decompressed, len(decompressed))
-            else:
-                dst_addr = dst_ptr.value
-                assert dst_addr
-                copy_plane_strided(
-                    dst_addr,
-                    decompressed,
-                    plane_info.width,
-                    plane_info.height,
-                    plane_info.bytes_per_sample,
-                    stride,
-                )
+            copy_plane(
+                f_out.get_write_ptr(p).value,
+                decompress_plane(plane_parts[p], plane_info.size_bytes, header.compression),
+                plane_info.width,
+                plane_info.height,
+                plane_info.bytes_per_sample,
+                f_out.get_stride(p),
+            )
 
         return f_out
 

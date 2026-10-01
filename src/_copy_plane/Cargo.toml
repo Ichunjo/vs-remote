@@ -1,0 +1,44 @@
+[package]
+name = "vsremote-rs"
+edition = "2024"
+description = "Internal Rust module for vsremote"
+publish = false
+
+[lib]
+name = "_copy_plane"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[build-dependencies]
+pyo3-build-config = "0.29.2"
+
+[dependencies]
+pyo3 = { version = "0.29.2", features = ["extension-module"] }
+
+[features]
+default = ["abi3-py312", "abi3t-py315"]
+abi3-py312 = ["pyo3/abi3-py312"]
+abi3t-py315 = ["pyo3/abi3t-py315"]
+
+[profile.release]
+panic = "abort"
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true
+
+[lints.rust]
+improper_ctypes = "warn"
+improper_ctypes_definitions = "warn"
+non_ascii_idents = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+single_use_lifetimes = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = [] }
+unnameable_types = "warn"
+unreachable_pub = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
