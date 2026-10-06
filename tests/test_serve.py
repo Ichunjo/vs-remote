@@ -23,7 +23,7 @@ core = vs.core
 HOST = "127.0.0.1"
 
 
-@pytest.mark.vpy("initial-core")
+@pytest.mark.vpy("unique-core")
 def test_serve_lifecycle(server: ServerFactory, tmp_path: Path, vpy_policy: Policy) -> None:
     """Test full serve lifecycle with multi-output VapourSynth script, frame fetching, and clean shutdown."""
     script_file = tmp_path / "test_serve.vpy"

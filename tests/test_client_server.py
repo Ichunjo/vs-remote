@@ -112,7 +112,7 @@ async def test_async_client_operations(running_server: tuple[str, int]) -> None:
         assert len(planes) == 3
 
 
-@pytest.mark.vpy("initial-core")
+@pytest.mark.vpy("unique-core")
 def test_remote_source_frame_rendering(running_server: tuple[str, int], test_clip: vs.VideoNode) -> None:
     host, port = running_server
     address = f"tcp://{host}:{port}"
@@ -849,8 +849,7 @@ def test_client_address_normalization() -> None:
 @pytest.mark.vpy("initial-core")
 def test_source_reuse_transport(running_server: tuple[str, int]) -> None:
     host, port = running_server
-    address = f"tcp://{host}:{port}"
-    with ClientTransport(address) as trans:
+    with ClientTransport(f"tcp://{host}:{port}") as trans:
         clip = source(trans, output=0)
         assert clip.width == 128
         frame = clip.get_frame(0)
@@ -907,7 +906,7 @@ def test_transport_event_dispatch_decoupling() -> None:
             assert event.text == f"chunk_{i}"
 
 
-@pytest.mark.vpy("initial-core")
+@pytest.mark.vpy("unique-core")
 def test_client_seeking_future_pruning(server: ServerFactory) -> None:
     # Create 100 frame clip
     clip = core.std.BlankClip(width=64, height=64, length=100)

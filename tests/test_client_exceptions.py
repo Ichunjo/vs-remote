@@ -405,7 +405,7 @@ def test_remote_command_and_payload_errors_via_response_envelope() -> None:
 
 
 # source() Helper Function Edge Cases
-@pytest.mark.vpy("initial-core")
+@pytest.mark.vpy("unique-core")
 def test_source_helper_error_handling(server: ServerFactory, test_clip: vs.VideoNode) -> None:
     """Verify source() raises RemoteNotFoundError and RemoteAuthenticationError correctly."""
     token = "my_token"
