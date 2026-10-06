@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+__lazy_modules__ = ["zmq.utils.z85"]
+
 from collections.abc import Sequence
 
 import zmq.utils.z85

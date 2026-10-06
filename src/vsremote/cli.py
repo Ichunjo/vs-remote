@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+__lazy_modules__ = ["zmq"]
+
 import asyncio
 import contextlib
 import json
@@ -17,19 +19,12 @@ import msgspec
 import vapoursynth as vs
 import zmq
 from cyclopts import App, Parameter
-from rich.live import Live
-from rich.markup import escape
-from rich.panel import Panel
-from rich.status import Status
-from rich.table import Table
-from rich.text import Text
 from vsengine import ManagedEnvironment, Policy, UnifiedFuture
 
 from .client.transport import ClientTransport
 from .exceptions import RemoteError, TransportError, UnsupportedFormatError
 from .protocol import DEFAULT_ADDRESS, ClipInfo, Compression, FrameHeader, ServerStats, StatusCode, decompress_plane
 from .server import ScriptRunner, ServerDaemon
-from .tui import build_dashboard
 from .utils import console, setup_logging
 
 logger = logging.getLogger(__name__)
@@ -197,6 +192,8 @@ def info(*, config: ClientConfig = DEFAULT_CLIENT_CONFIG, timeout: float = 10.0)
     Args:
         timeout: The number of seconds to wait for the info result.
     """
+    from rich.table import Table
+
     with config.create_transport(subscribe_streams=False) as transport:
         outputs = transport.list_outputs().result(timeout=timeout)
 
@@ -317,6 +314,13 @@ def top(
             print(json.dumps(parsed, indent=2))
             return
 
+        from rich.live import Live
+        from rich.panel import Panel
+        from rich.status import Status
+        from rich.text import Text
+
+        from .tui import build_dashboard
+
         last_known_stats: ServerStats | None = None
         error_msg: str | None = None
 
@@ -353,6 +357,8 @@ def keygen() -> None:
     """
     Generate a new Curve25519 keypair for CurveZMQ transport encryption.
     """
+    from rich.markup import escape
+
     pub, sec = zmq.curve_keypair()
     pub_str = escape(pub.decode("ascii"))
     sec_str = escape(sec.decode("ascii"))
