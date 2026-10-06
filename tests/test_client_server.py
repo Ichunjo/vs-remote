@@ -776,7 +776,7 @@ def test_curvezmq_end_to_end_encryption(server: ServerFactory, test_clip: vs.Vid
         assert len(outputs) == 1
 
         # Fetch encrypted frame proxy via source()
-        proxy = source(f"tcp://{host}:{port}", output=0, curve_server_key=server_public)
+        proxy = source(client.transport, output=0)
         frame = proxy.get_frame(0)
         assert frame.width == test_clip.width
         assert bytes(frame[0]) == bytes(test_clip.get_frame(0)[0])
