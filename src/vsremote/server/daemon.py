@@ -82,6 +82,7 @@ class ServerDaemon:
         self._zap_task: asyncio.Task[None] | None = None
         self._executor: ThreadPoolExecutor | None = None
         self._running = False
+        self._stopping = False
         self._send_lock: asyncio.Lock | None = None
         self._active_tasks = set[asyncio.Task[None]]()
         self._inflight_tasks = dict[tuple[bytes, int], asyncio.Task[None]]()
@@ -224,6 +225,9 @@ class ServerDaemon:
 
     async def stop(self) -> None:
         """Stop server and clean up active connections and resources."""
+        if self._stopping:
+            return
+        self._stopping = True
         self._running = False
         logger.info("Shutting down server...")
 
