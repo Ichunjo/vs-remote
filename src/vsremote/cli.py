@@ -97,9 +97,9 @@ def serve(
         Parameter(env_var="VSREMOTE_CURVE_ALLOWED_KEYS", consume_multiple=True),
     ] = None,
     # Not exposed to the CLI
-    ready_event: Annotated[threading.Event | asyncio.Event | None, Parameter(show=False)] = None,
-    stop_event: Annotated[threading.Event | asyncio.Event | None, Parameter(show=False)] = None,
-    environment: Annotated[Policy | ManagedEnvironment | None, Parameter(show=False)] = None,
+    ready_event: Annotated[threading.Event | asyncio.Event | None, Parameter(parse=False)] = None,
+    stop_event: Annotated[threading.Event | asyncio.Event | None, Parameter(parse=False)] = None,
+    environment: Annotated[Policy | ManagedEnvironment | None, Parameter(parse=False)] = None,
 ) -> None:
     """
     Host a VapourSynth script on the network.
