@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 import vapoursynth as vs
+import zmq
 from vsengine.policy import Policy
 
 from vsremote.cli import app, keygen, serve
@@ -121,11 +122,20 @@ def test_serve_cli_curve_allowed_keys_env_var(monkeypatch: pytest.MonkeyPatch) -
     assert bound.arguments["curve_allowed_keys"] == ["key_alpha", "key_beta"]
 
 
-def test_keygen_cli_command() -> None:
-    """Test that keygen CLI command executes and outputs public/secret keys."""
+def test_keygen_cli_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that keygen CLI command executes and outputs public/secret keys safely."""
     func, _, _ = app.parse_args(["keygen"])
     assert func == keygen
     keygen()
+
+    problematic_pairs = [
+        (b"[/pCXlglk3Wz!Zjur&YLUe1$hd4$a?Ml<s{t1fYb", b"]^RR@@Le*+@?H&{}&X&gtDt<1/IAORgTJ2n}O@a/"),
+        (b"[bold red]test[cyan]", b"[/bold red]end[yellow]"),
+        (b"[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[", b"]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]"),
+    ]
+    for pub, sec in problematic_pairs:
+        monkeypatch.setattr(zmq, "curve_keypair", lambda p=pub, s=sec: (p, s))
+        keygen()
 
 
 @pytest.mark.vpy("no-policy")

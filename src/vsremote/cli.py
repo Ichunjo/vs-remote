@@ -357,31 +357,39 @@ def keygen() -> None:
     """
     Generate a new Curve25519 keypair for CurveZMQ transport encryption.
     """
-    from rich.markup import escape
+    from rich.text import Text
 
     pub, sec = zmq.curve_keypair()
-    pub_str = escape(pub.decode("ascii"))
-    sec_str = escape(sec.decode("ascii"))
+    pub_str = pub.decode("ascii")
+    sec_str = sec.decode("ascii")
 
     console.print("[bold green]Generated CurveZMQ Keypair:[/bold green]\n")
-    console.print(f"  [bold]Public Key:[/bold]  [cyan]{pub_str}[/cyan]")
-    console.print(f"  [bold]Secret Key:[/bold]  [yellow]{sec_str}[/yellow]\n")
+    console.print(Text.assemble("  ", ("Public Key:", "bold"), "  ", (pub_str, "cyan")))
+    console.print(Text.assemble("  ", ("Secret Key:", "bold"), "  ", (sec_str, "yellow"), "\n"))
 
     console.print("[bold dim]Usage (Server Encryption):[/bold dim]")
-    console.print(f'  Server:  vsremote serve script.vpy --curve-secret-key "{sec_str}"')
-    console.print(f'  Client:  vsremote.source("tcp://...", curve_server_key="{pub_str}")\n')
+    console.print(f'  Server:  vsremote serve script.vpy --curve-secret-key "{sec_str}"', markup=False, highlight=False)
+    console.print(
+        f'  Client:  vsremote.source("tcp://...", curve_server_key="{pub_str}")\n', markup=False, highlight=False
+    )
 
     console.print("[bold dim]Usage (Client Authentication):[/bold dim]")
     console.print(
-        f'  Server:  vsremote serve script.vpy --curve-secret-key "<SERVER_SEC>" --curve-allowed-keys "{pub_str}"'
+        f'  Server:  vsremote serve script.vpy --curve-secret-key "<SERVER_SEC>" --curve-allowed-keys "{pub_str}"',
+        markup=False,
+        highlight=False,
     )
     console.print(
         f'  Client:  vsremote.source("tcp://...", curve_server_key="<SERVER_PUB>", '
-        f'curve_public_key="{pub_str}", curve_secret_key="{sec_str}")'
+        f'curve_public_key="{pub_str}", curve_secret_key="{sec_str}")',
+        markup=False,
+        highlight=False,
     )
     console.print(
         f'  CLI:     vsremote pipe --curve-server-key "<SERVER_PUB>" '
-        f'--curve-public-key "{pub_str}" --curve-secret-key "{sec_str}"\n'
+        f'--curve-public-key "{pub_str}" --curve-secret-key "{sec_str}"\n',
+        markup=False,
+        highlight=False,
     )
 
 
