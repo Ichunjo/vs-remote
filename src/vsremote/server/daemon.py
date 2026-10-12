@@ -411,15 +411,20 @@ class ServerDaemon:
                 await self._handle_get_frame(req)
 
             case Command.SUBSCRIBE_STREAM:
-                self._subscribers.add(req.identity)
-                await self._send_reply(req, StatusCode.OK, b"OK")
+                try:
+                    stream_req = unpack_payload(req.payload_bytes, StreamSubscribeRequest)
+                except (msgspec.MsgspecError, TypeError) as e:
+                    await self._send_error(req, StatusCode.INVALID_PAYLOAD, f"Invalid StreamSubscribeRequest: {e}")
+                else:
+                    self._subscribers.add(req.identity)
+                    await self._send_reply(req, StatusCode.OK, b"OK")
 
-                # Replay historical startup logs if requested
-                if unpack_payload(req.payload_bytes, StreamSubscribeRequest).replay_history:
-                    zero_req_id = (0).to_bytes(4, byteorder="big")
-                    status_ok = bytes([StatusCode.OK])
-                    for event in self.runner.startup_events:
-                        await self._send_multipart([req.identity, zero_req_id, status_ok, pack_payload(event)])
+                    # Replay historical startup logs if requested
+                    if stream_req.replay_history:
+                        zero_req_id = (0).to_bytes(4, byteorder="big")
+                        status_ok = bytes([StatusCode.OK])
+                        for event in self.runner.startup_events:
+                            await self._send_multipart([req.identity, zero_req_id, status_ok, pack_payload(event)])
 
             case Command.UNSUBSCRIBE_STREAM:
                 self._subscribers.discard(req.identity)
@@ -464,6 +469,8 @@ class ServerDaemon:
                     StatusCode.PERMISSION_DENIED,
                     "Dynamic script loading is disabled on this server (allow_eval=False)",
                 )
+            case _:
+                await self._send_error(req, StatusCode.INVALID_COMMAND, f"The command {req.command.name} is invalid")
 
     async def _handle_get_frame(self, req: RequestEnvelope) -> None:
         if not self._socket:
