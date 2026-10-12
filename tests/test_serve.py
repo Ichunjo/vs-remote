@@ -211,7 +211,8 @@ async def test_windows_ctrl_handler(monkeypatch: pytest.MonkeyPatch) -> None:
             handlers.append(handler)
         return True
 
-    monkeypatch.setattr(ctypes.windll.kernel32, "SetConsoleCtrlHandler", mock_set_console_ctrl_handler)
+    if sys.platform == "win32":
+        monkeypatch.setattr(ctypes.windll.kernel32, "SetConsoleCtrlHandler", mock_set_console_ctrl_handler)
     cleanup = _setup_windows_ctrl_handler(asyncio.get_running_loop(), on_stop)
     assert len(handlers) == 1
     handler = handlers[0]
