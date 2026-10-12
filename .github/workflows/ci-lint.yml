@@ -44,7 +44,7 @@ jobs:
 
       - name: Run Ruff check
         id: ruff-check
-        run: uv run ruff check .
+        run: uv run ruff check
 
       - name: Run Ruff format
         id: ruff-format
@@ -53,4 +53,4 @@ jobs:
 
       - name: Running Pyrefly
         if: success() || (failure() && (steps.ruff-check.conclusion == 'failure' || steps.ruff-format.conclusion == 'failure'))
-        run: uv run pyrefly check .
+        run: uv run pyrefly check
