@@ -97,12 +97,11 @@ class ResponseEnvelope[T](msgspec.Struct, frozen=True):
         except ValueError as err:
             raise UnknownStatusCodeError(f"Unknown status code byte: {status_byte!r}") from err
 
-        payload: Any
         if status != StatusCode.OK:
             try:
                 payload = unpack_payload(payload_bytes, RemoteErrorPayload)
-            except Exception:
-                payload = unpack_payload(payload_bytes)
+            except msgspec.MsgspecError:
+                payload = RemoteErrorPayload(error=payload_bytes.decode(errors="replace") or status.name)
         elif target_type is None or target_type is bytes:
             payload = payload_bytes
         else:
@@ -297,7 +296,7 @@ class RemoteLogRecord(msgspec.Struct, tag="log", frozen=True):
     args: tuple[Any, ...] = ()
     filename: str = ""
     lineno: int = 0
-    funcName: str = ""
+    funcName: str = ""  # noqa: N815
     created: float = 0.0
     exc_text: str | None = None
     stack_info: str | None = None

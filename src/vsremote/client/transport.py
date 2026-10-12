@@ -685,7 +685,7 @@ class PendingEntry(NamedTuple):
             return
         try:
             envelope = ResponseEnvelope.from_frames(frames, self.response_type)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             self.future.try_set_exception(exc)
             return
 

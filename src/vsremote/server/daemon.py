@@ -219,8 +219,11 @@ class ServerDaemon:
             for identity in subscribers:
                 try:
                     await self._send_multipart([identity, zero_req_id, status_ok, payload])
-                except Exception:
-                    logger.debug("Failed to send broadcast event to subscriber %r", identity)
+                except TransportClosedError:
+                    logger.error(
+                        "Failed to send broadcast event to subscriber %r because transport is closed",
+                        identity,
+                    )
 
         task = asyncio.create_task(send_all())
         self._active_tasks.add(task)
@@ -326,8 +329,8 @@ class ServerDaemon:
                     )
             except (asyncio.CancelledError, zmq.ZMQError):
                 break
-            except Exception as exc:
-                logger.error("Error handling ZAP authentication request: %s", exc)
+            except Exception:
+                logger.exception("Error handling ZAP authentication request:")
                 with contextlib.suppress(Exception):
                     await self._zap_socket.send_multipart(
                         [version, req_id, _ZAP_STATUS_ERR, b"Internal authentication error", _ZAP_EMPTY, _ZAP_EMPTY]
