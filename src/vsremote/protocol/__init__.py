@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .codec import compress_plane, decompress_plane, pack_payload, sanitize_props, unpack_payload
+from .codec import compress_plane, decompress_plane, sanitize_props, unpack_payload
 from .constants import (
     DEFAULT_ADDRESS,
     DEFAULT_HOST,
@@ -66,7 +66,6 @@ __all__ = [
     "StreamSubscribeRequest",
     "compress_plane",
     "decompress_plane",
-    "pack_payload",
     "sanitize_props",
     "unpack_payload",
     "validate_curve_allowed_keys",

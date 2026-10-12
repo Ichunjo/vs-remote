@@ -114,8 +114,8 @@ class RequestEnvelope(msgspec.Struct, frozen=True):
     """Structured representation of a parsed ZeroMQ ROUTER multipart request."""
 
     identity: bytes
-    request_id_bytes: bytes
-    request_id: int
+    req_id_bytes: bytes
+    req_id: int
     command: Command = Command.UNKNOWN
     payload_bytes: bytes = b""
     auth_token: str | None = None
@@ -153,8 +153,8 @@ class RequestEnvelope(msgspec.Struct, frozen=True):
 
         return cls(
             identity=identity,
-            request_id_bytes=req_id_bytes,
-            request_id=req_id,
+            req_id_bytes=req_id_bytes,
+            req_id=req_id,
             command=cmd,
             payload_bytes=payload_bytes,
             auth_token=auth_token,
@@ -264,7 +264,7 @@ class FrameHeader(msgspec.Struct, frozen=True):
     """Header sent alongside video frame plane buffers."""
 
     status: StatusCode
-    request_id: int
+    req_id: int
     n: int
     output_index: int
     compression: Compression
@@ -328,7 +328,7 @@ class LoadScriptRequest(msgspec.Struct, frozen=True):
 class CancelRequest(msgspec.Struct, frozen=True):
     """Request payload to cancel an in-flight server task by request ID."""
 
-    request_id: int
+    req_id: int
 
 
 class ClientSessionStats(msgspec.Struct, frozen=True):

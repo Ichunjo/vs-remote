@@ -14,6 +14,7 @@ from concurrent.futures import Future
 from logging import getLogger
 from typing import Any, NamedTuple, Self, overload
 
+import msgspec
 import zmq
 import zmq.asyncio
 from typing_extensions import TypeForm
@@ -46,7 +47,6 @@ from ..protocol import (
     StreamEvent,
     StreamOutputEvent,
     StreamSubscribeRequest,
-    pack_payload,
     unpack_payload,
     validate_curve_key,
 )
@@ -207,7 +207,7 @@ class ClientTransport:
     def send_request(
         self,
         cmd: Command,
-        payload: Any = None,
+        payload: msgspec.Struct | None = None,
         *,
         response_type: None = None,
     ) -> UnifiedFuture[ResponseEnvelope[bytes]]: ...
@@ -216,18 +216,18 @@ class ClientTransport:
     def send_request[T](
         self,
         cmd: Command,
-        payload: Any = None,
+        payload: msgspec.Struct | None = None,
         *,
         response_type: TypeForm[T],
     ) -> UnifiedFuture[ResponseEnvelope[T]]: ...
 
-    def send_request(
+    def send_request[T](
         self,
         cmd: Command,
-        payload: Any = None,
+        payload: msgspec.Struct | None = None,
         *,
-        response_type: Any | None = None,
-    ) -> UnifiedFuture[ResponseEnvelope[Any]]:
+        response_type: TypeForm[T] | None = None,
+    ) -> UnifiedFuture[ResponseEnvelope[T]]:
         """
         Send a request asynchronously over the transport (thread-safe).
 
@@ -263,7 +263,7 @@ class ClientTransport:
 
         fut.add_done_callback(on_done)
 
-        payload_bytes = pack_payload(payload) if payload is not None else b""
+        payload_bytes = msgspec.msgpack.encode(payload) if payload is not None else b""
         try:
             self._send_message(req_id, cmd, payload_bytes)
         except TransportError as exc:
@@ -671,7 +671,7 @@ class ClientTransport:
     def _cancel_request(self, req_id: int) -> None:
         cancelled = self._tracker.cancel(req_id)
         if cancelled and self._running and self._loop and self._send_queue is not None:
-            cancel_payload = pack_payload(CancelRequest(request_id=req_id))
+            cancel_payload = msgspec.msgpack.encode(CancelRequest(req_id=req_id))
             with contextlib.suppress(TransportError, RuntimeError):
                 self._send_message(0, Command.CANCEL_REQUEST, cancel_payload)
 

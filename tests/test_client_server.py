@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 from unittest.mock import MagicMock
 
+import msgspec
 import pytest
 import vapoursynth as vs
 import vsengine.video
@@ -33,15 +34,7 @@ from vsremote.exceptions import (
     TransportClosedError,
     TransportNotStartedError,
 )
-from vsremote.protocol import (
-    Command,
-    RemoteLogRecord,
-    ResponseEnvelope,
-    StatusCode,
-    StreamEvent,
-    StreamOutputEvent,
-    pack_payload,
-)
+from vsremote.protocol import Command, RemoteLogRecord, ResponseEnvelope, StatusCode, StreamEvent, StreamOutputEvent
 from vsremote.server import LogForwarder, RemotePolicy, ScriptRunner, ServerDaemon
 from vsremote.server.daemon import _is_loopback_address
 from vsremote.utils import SafeUnifiedFuture, setup_logging
@@ -887,7 +880,7 @@ def test_transport_event_dispatch_decoupling() -> None:
             parts = [
                 b"\x00\x00\x00\x00",
                 bytes([StatusCode.OK]),
-                pack_payload(StreamOutputEvent(stream="stdout", text=f"chunk_{i}")),
+                msgspec.msgpack.encode(StreamOutputEvent(stream="stdout", text=f"chunk_{i}")),
             ]
             trans._dispatch_response(parts)
         dispatch_duration = time.perf_counter() - t0
@@ -1191,7 +1184,7 @@ async def test_server_daemon_invalid_commands_and_payloads(server: ServerFactory
 
             # GET_FRAME with invalid output index -> NOT_FOUND
             req_id_4 = (104).to_bytes(4, "big")
-            bad_frame_req = pack_payload({"output_index": 999, "n": 0, "compression": "zstd"})
+            bad_frame_req = msgspec.msgpack.encode({"output_index": 999, "n": 0, "compression": "zstd"})
             await sock.send_multipart([req_id_4, bytes([Command.GET_FRAME.value]), bad_frame_req])
             reply_4 = await sock.recv_multipart()
             assert reply_4[0] == req_id_4

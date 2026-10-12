@@ -42,7 +42,6 @@ from ..protocol import (
     StreamEvent,
     StreamSubscribeRequest,
     compress_plane,
-    pack_payload,
     sanitize_props,
     unpack_payload,
     validate_curve_allowed_keys,
@@ -210,7 +209,7 @@ class ServerDaemon:
         if not self._running or not self._subscribers or not self._socket:
             return
 
-        payload = pack_payload(event)
+        payload = msgspec.msgpack.encode(event)
         zero_req_id = (0).to_bytes(4, byteorder="big")
         status_ok = bytes([StatusCode.OK])
         subscribers = list(self._subscribers)
@@ -356,7 +355,7 @@ class ServerDaemon:
             logger.warning("Unauthorized request from identity %r (invalid or missing auth token)", req.identity)
             return await self._send_error(req, StatusCode.UNAUTHORIZED, "Unauthorized: invalid or missing auth token")
 
-        key = req.identity, req.request_id
+        key = req.identity, req.req_id
         if (current_task := asyncio.current_task()) is not None:
             self._inflight_tasks[key] = current_task
 
@@ -383,12 +382,12 @@ class ServerDaemon:
                         compression_mode=self.compression,
                         in_flight_requests=len(self._inflight_tasks),
                     )
-                await self._send_reply(req, StatusCode.OK, pack_payload(stats))
+                await self._send_reply(req, StatusCode.OK, msgspec.msgpack.encode(stats))
 
             case Command.CANCEL_REQUEST:
                 try:
                     cancel_payload = unpack_payload(req.payload_bytes, CancelRequest)
-                    if task := self._inflight_tasks.get((req.identity, cancel_payload.request_id)):
+                    if task := self._inflight_tasks.get((req.identity, cancel_payload.req_id)):
                         task.cancel()
                 except (msgspec.MsgspecError, TypeError) as e:
                     logger.debug("Failed to cancel request: %s", e)
@@ -398,13 +397,13 @@ class ServerDaemon:
 
             case Command.LIST_OUTPUTS:
                 outputs = self.runner.list_outputs()
-                await self._send_reply(req, StatusCode.OK, pack_payload(outputs))
+                await self._send_reply(req, StatusCode.OK, msgspec.msgpack.encode(outputs))
 
             case Command.GET_CLIP_INFO:
                 try:
                     payload = unpack_payload(req.payload_bytes, OutputIndexRequest)
                     info = self.runner.get_clip_info(payload.output_index)
-                    await self._send_reply(req, StatusCode.OK, pack_payload(info))
+                    await self._send_reply(req, StatusCode.OK, msgspec.msgpack.encode(info))
                 except KeyError as e:
                     await self._send_error(req, StatusCode.NOT_FOUND, str(e))
                 except (msgspec.MsgspecError, TypeError) as e:
@@ -424,10 +423,10 @@ class ServerDaemon:
 
                     # Replay historical startup logs if requested
                     if stream_req.replay_history:
-                        zero_req_id = (0).to_bytes(4, byteorder="big")
-                        status_ok = bytes([StatusCode.OK])
+                        req_id = (0).to_bytes(4, byteorder="big")
+                        status = bytes([StatusCode.OK])
                         for event in self.runner.startup_events:
-                            await self._send_multipart([req.identity, zero_req_id, status_ok, pack_payload(event)])
+                            await self._send_multipart([req.identity, req_id, status, msgspec.msgpack.encode(event)])
 
             case Command.UNSUBSCRIBE_STREAM:
                 self._subscribers.discard(req.identity)
@@ -479,14 +478,14 @@ class ServerDaemon:
         if not self._socket:
             return None
 
-        request_id = req.request_id
+        req_id = req.req_id
 
         try:
             frame_req = unpack_payload(req.payload_bytes, FrameRequest)
         except (msgspec.MsgspecError, TypeError) as e:
             header = FrameHeader(
                 status=StatusCode.INVALID_PAYLOAD,
-                request_id=req.request_id,
+                req_id=req.req_id,
                 n=0,
                 output_index=0,
                 compression=self.compression,
@@ -494,7 +493,7 @@ class ServerDaemon:
                 props={},
                 error_message=f"Failed to decode frame request payload: {e}",
             )
-            return await self._send_reply(req, header.status, pack_payload(header))
+            return await self._send_reply(req, header.status, msgspec.msgpack.encode(header))
 
         output_index = frame_req.output_index
         n = frame_req.n
@@ -507,7 +506,7 @@ class ServerDaemon:
         except KeyError as e:
             header = FrameHeader(
                 status=StatusCode.NOT_FOUND,
-                request_id=request_id,
+                req_id=req_id,
                 n=n,
                 output_index=output_index,
                 compression=compression_str,
@@ -515,7 +514,7 @@ class ServerDaemon:
                 props={},
                 error_message=str(e),
             )
-            return await self._send_reply(req, header.status, pack_payload(header))
+            return await self._send_reply(req, header.status, msgspec.msgpack.encode(header))
 
         t_render_start = time.perf_counter()
         try:
@@ -542,7 +541,7 @@ class ServerDaemon:
 
                 header = FrameHeader(
                     status=StatusCode.OK,
-                    request_id=request_id,
+                    req_id=req_id,
                     n=n,
                     output_index=output_index,
                     compression=compression_str,
@@ -551,7 +550,7 @@ class ServerDaemon:
                 )
 
                 # Stream response back to client
-                await self._send_reply(req, StatusCode.OK, pack_payload(header), planes)
+                await self._send_reply(req, StatusCode.OK, msgspec.msgpack.encode(header), planes)
 
         except asyncio.CancelledError:
             self.metrics.on_frame_cancelled()
@@ -563,7 +562,7 @@ class ServerDaemon:
             tb = traceback.format_exc()
             header = FrameHeader(
                 status=StatusCode.ERROR,
-                request_id=request_id,
+                req_id=req_id,
                 n=n,
                 output_index=output_index,
                 compression=compression_str,
@@ -571,7 +570,7 @@ class ServerDaemon:
                 props={},
                 error_message=f"{e}\n\n[Remote Traceback]:\n{tb}".strip(),
             )
-            await self._send_reply(req, header.status, pack_payload(header))
+            await self._send_reply(req, header.status, msgspec.msgpack.encode(header))
 
     async def _dispatch_executor[T](
         self,
@@ -591,7 +590,7 @@ class ServerDaemon:
         err: Exception | None = None
         try:
             outputs = await loop.run_in_executor(self._executor, action, payload)
-            return await self._send_reply(req, StatusCode.OK, pack_payload(outputs))
+            return await self._send_reply(req, StatusCode.OK, msgspec.msgpack.encode(outputs))
         except (FileNotFoundError, ScriptNotLoadedError) as e:
             logger.debug("%s: %s", error_context, e)
             status = StatusCode.NOT_FOUND
@@ -616,7 +615,7 @@ class ServerDaemon:
         payload_bytes: bytes,
         extra_frames: Sequence[bytes | memoryview] = (),
     ) -> None:
-        await self._send_multipart([req.identity, req.request_id_bytes, bytes([status]), payload_bytes, *extra_frames])
+        await self._send_multipart([req.identity, req.req_id_bytes, bytes([status]), payload_bytes, *extra_frames])
 
     @overload
     async def _send_error(self, req: RequestEnvelope, status: StatusCode, message: str, /) -> None: ...
@@ -624,7 +623,7 @@ class ServerDaemon:
     async def _send_error(self, req: RequestEnvelope, status: StatusCode, payload: RemoteErrorPayload, /) -> None: ...
     async def _send_error(self, req: RequestEnvelope, status: StatusCode, v: str | RemoteErrorPayload, /) -> None:
         payload = RemoteErrorPayload(v, status.name.replace("_", " ").title(), v) if isinstance(v, str) else v
-        await self._send_multipart([req.identity, req.request_id_bytes, bytes([status]), pack_payload(payload)])
+        await self._send_multipart([req.identity, req.req_id_bytes, bytes([status]), msgspec.msgpack.encode(payload)])
 
     async def _send_multipart(self, parts: Sequence[bytes | memoryview]) -> None:
         if not self._socket or not self._send_lock:

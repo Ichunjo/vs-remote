@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Mapping
-from typing import Any, overload
+from typing import Any
 
 import msgspec
 import zstandard as zstd
@@ -43,39 +43,22 @@ def sanitize_props(props: Mapping[str, Any]) -> dict[str, Any]:
     return clean
 
 
-def pack_payload(data: Any) -> bytes:
-    """Serialize a Python dict, primitive, or dataclass to MsgPack bytes."""
-    return msgspec.msgpack.encode(data)
-
-
-@overload
-def unpack_payload[T](data: bytes, target_type: TypeForm[T]) -> T: ...
-@overload
-def unpack_payload(data: bytes, target_type: None = None) -> Any: ...
-def unpack_payload(data: bytes, target_type: Any = None) -> Any:
+def unpack_payload[T](data: bytes, target_type: TypeForm[T]) -> T:
     """
-    Deserialize MsgPack bytes into Python objects or the specified target type.
+    Deserialize MsgPack bytes into the specified target type.
 
     Args:
         data: MsgPack encoded byte buffer.
-        target_type: Optional target struct or type to decode into.
+        target_type: Target struct or type to decode into.
 
     Returns:
-        The decoded Python object or target instance.
+        The decoded target instance.
 
     Raises:
         msgspec.DecodeError: If data is not valid MsgPack.
         msgspec.ValidationError: If decoded data does not conform to target_type.
     """
-    if not data:
-        if target_type is None:
-            return {}  # pyrefly: ignore [implicit-any-empty-container]
-        try:
-            return target_type()
-        except TypeError:
-            return msgspec.msgpack.decode(b"\x80", type=target_type)
-
-    return msgspec.msgpack.decode(data) if target_type is None else msgspec.msgpack.decode(data, type=target_type)
+    return msgspec.msgpack.decode(data or b"\x80", type=target_type)
 
 
 def compress_plane(data: bytes | memoryview, mode: Compression) -> bytes:

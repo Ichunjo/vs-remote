@@ -152,7 +152,7 @@ def test_pipe_command_frame_error(monkeypatch: pytest.MonkeyPatch) -> None:
         (
             FrameHeader(
                 status=StatusCode.ERROR,
-                request_id=1,
+                req_id=1,
                 n=0,
                 output_index=0,
                 compression="zstd",
