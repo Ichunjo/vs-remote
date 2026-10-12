@@ -138,7 +138,7 @@ class ScriptRunner:
             fn = filename or "<remote_code>"
             linecache.cache[fn] = len(code), None, code.splitlines(keepends=True), fn
             if filename:
-                norm_fn = os.path.abspath(os.path.normpath(filename))
+                norm_fn = os.path.abspath(os.path.normpath(filename))  # noqa: PTH100
                 linecache.cache[norm_fn] = (len(code), None, code.splitlines(keepends=True), norm_fn)
             logger.info("Loading code string (filename: %s, cwd: %s)", fn, chdir)
 

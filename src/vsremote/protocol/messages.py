@@ -86,7 +86,7 @@ class ResponseEnvelope[T](msgspec.Struct, frozen=True):
             case [status_byte, payload_bytes, *extra]:
                 pass
             case [status_byte]:
-                payload_bytes, extra = b"", []
+                payload_bytes, extra = b"", list[bytes]()
             case _:
                 raise MalformedMessageError(
                     f"Malformed multipart response: expected at least 1 part, got {len(frames)}"
@@ -132,7 +132,7 @@ class RequestEnvelope(msgspec.Struct, frozen=True):
             case [identity, req_id_bytes, cmd_byte, payload_bytes, *extra]:
                 pass
             case [identity, req_id_bytes, cmd_byte]:
-                payload_bytes, extra = b"", []
+                payload_bytes, extra = b"", list[bytes]()
             case _:
                 raise MalformedMessageError(
                     f"Malformed multipart request: expected at least 3 parts, got {len(frames)}"

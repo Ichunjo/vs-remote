@@ -184,7 +184,7 @@ class ServerContext:
             case str() | os.PathLike():
                 self._runner = ScriptRunner.from_script(self.target, environment=self.environment)
             case Sequence():
-                self._runner = ScriptRunner.from_clips(self.target)  # type: ignore[arg-type]
+                self._runner = ScriptRunner.from_clips(self.target)
             case _ if self.default_clips_factory:
                 self._runner = ScriptRunner.from_clips(self.default_clips_factory())
             case _:

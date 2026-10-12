@@ -8,6 +8,7 @@ from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from logging import Handler, LogRecord
+from types import TracebackType
 from typing import Any, Literal, Self, TextIO, override
 
 import msgspec
@@ -121,7 +122,12 @@ class StreamRedirector(io.TextIOBase):
         return self
 
     @override
-    def __exit__(self, *_: object) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         self.uninstall()
 
     @property
@@ -165,7 +171,7 @@ class StreamRedirector(io.TextIOBase):
         return written
 
     @override
-    def writelines(self, lines: Iterable[str]) -> None:  # type: ignore[override]
+    def writelines(self, lines: Iterable[str]) -> None:
         for line in lines:
             self.write(line)
 

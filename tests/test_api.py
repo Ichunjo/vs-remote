@@ -127,7 +127,7 @@ def test_set_output_unsupported_node_type(monkeypatch: pytest.MonkeyPatch) -> No
 
     fake = FakeRawNode()
     with pytest.raises(NotImplementedError):
-        set_output(fake, False)  # type: ignore[call-overload]
+        set_output(fake, False)  # pyrefly: ignore [no-matching-overload]
 
 
 def test_resolve_var_name_edge_cases() -> None:

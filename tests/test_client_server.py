@@ -167,7 +167,7 @@ def test_concurrent_frame_requests(running_server: tuple[str, int]) -> None:
         # Concurrently request 20 frames across 8 worker threads
         def fetch(n: int) -> int:
             f = remote_clip.get_frame(n % 20)
-            return f.props["TestInt"]  # type: ignore[return-value]
+            return f.props["TestInt"]  # pyrefly: ignore [bad-return]
 
         with ThreadPoolExecutor(max_workers=8) as pool:
             results = list(pool.map(fetch, range(40)))
@@ -1251,7 +1251,7 @@ def test_log_forwarder_arg_types_and_errors() -> None:
 
     # Scalar non-tuple non-dict args
     rec_scalar = logging.LogRecord("test", logging.INFO, "path", 1, "Scalar", (), None)
-    rec_scalar.args = 9999  # type: ignore[assignment]
+    rec_scalar.args = 9999  # pyrefly: ignore [bad-assignment]
     forwarder.emit(rec_scalar)
     assert len(events) == 4
 
