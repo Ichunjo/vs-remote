@@ -51,6 +51,6 @@ jobs:
         if: success() || (failure() && steps.ruff-check.conclusion == 'failure')
         run: uv run ruff format --check --diff
 
-      - name: Running mypy
+      - name: Running Pyrefly
         if: success() || (failure() && (steps.ruff-check.conclusion == 'failure' || steps.ruff-format.conclusion == 'failure'))
-        run: uv run mypy .
+        run: uv run pyrefly check .
