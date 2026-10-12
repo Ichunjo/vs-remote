@@ -22,7 +22,7 @@ from cyclopts import App, Parameter
 from vsengine import ManagedEnvironment, Policy, UnifiedFuture
 
 from .client.transport import ClientTransport
-from .exceptions import RemoteError, TransportError, UnsupportedFormatError
+from .exceptions import UnsupportedFormatError, VSRemoteError
 from .protocol import DEFAULT_ADDRESS, ClipInfo, Compression, FrameHeader, ServerStats, decompress_plane
 from .server import ScriptRunner, ServerDaemon
 from .utils import console, setup_logging
@@ -331,7 +331,7 @@ def top(
                     error_msg = None
                 except TimeoutError:
                     error_msg = f"Server unreachable at {config.address} (timed out)"
-                except (TransportError, RemoteError, Exception) as exc:
+                except VSRemoteError as exc:
                     err_str = str(exc).strip()
                     error_type = type(exc).__name__
                     error_msg = f"Connection error: {err_str}" if err_str else f"Connection error ({error_type})"

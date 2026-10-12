@@ -56,7 +56,7 @@ def _serialize_log_args(args: Any) -> tuple[Any, ...]:
     try:
         msgspec.msgpack.encode(raw_args)
         return raw_args
-    except Exception:
+    except TypeError:
         return tuple(str(a) for a in raw_args)
 
 
@@ -95,7 +95,7 @@ class LogForwarder(Handler):
                     stack_info=record.stack_info,
                 )
             )
-        except Exception:
+        except Exception:  # noqa: BLE001
             self.handleError(record)
 
 

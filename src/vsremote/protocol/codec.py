@@ -62,10 +62,14 @@ def unpack_payload(data: bytes, target_type: Any = None) -> Any:
 
     Returns:
         The decoded Python object or target instance.
+
+    Raises:
+        msgspec.DecodeError: If data is not valid MsgPack.
+        msgspec.ValidationError: If decoded data does not conform to target_type.
     """
     if not data:
         if target_type is None:
-            return {}
+            return {}  # pyrefly: ignore [implicit-any-empty-container]
         try:
             return target_type()
         except TypeError:

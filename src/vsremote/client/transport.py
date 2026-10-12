@@ -266,7 +266,7 @@ class ClientTransport:
         payload_bytes = pack_payload(payload) if payload is not None else b""
         try:
             self._send_message(req_id, cmd, payload_bytes)
-        except Exception as exc:
+        except TransportError as exc:
             self._tracker.pop(req_id)
             fut.try_set_exception(exc)
 
@@ -541,7 +541,7 @@ class ClientTransport:
                 return
             self._running = True
             self._startup_future.try_set_result(None)
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001
             if self._startup_future and not self._startup_future.done():
                 self._startup_future.try_set_exception(exc)
             self._cleanup_resources()

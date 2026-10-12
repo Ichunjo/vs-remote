@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from logging import getLogger
 from typing import Any, overload
 
+import msgspec
 import vapoursynth as vs
 import zmq
 import zmq.asyncio
@@ -386,7 +387,7 @@ class ServerDaemon:
                     cancel_payload = unpack_payload(req.payload_bytes, CancelRequest)
                     if task := self._inflight_tasks.get((req.identity, cancel_payload.request_id)):
                         task.cancel()
-                except Exception as e:
+                except (msgspec.MsgspecError, TypeError) as e:
                     logger.debug("Failed to cancel request: %s", e)
 
             case Command.PING:
@@ -403,7 +404,7 @@ class ServerDaemon:
                     await self._send_reply(req, StatusCode.OK, pack_payload(info))
                 except KeyError as e:
                     await self._send_error(req, StatusCode.NOT_FOUND, str(e))
-                except Exception as e:
+                except (msgspec.MsgspecError, TypeError) as e:
                     await self._send_error(req, StatusCode.INVALID_PAYLOAD, f"Invalid OutputIndexRequest: {e}")
 
             case Command.GET_FRAME:
@@ -472,7 +473,7 @@ class ServerDaemon:
 
         try:
             frame_req = unpack_payload(req.payload_bytes, FrameRequest)
-        except Exception as e:
+        except (msgspec.MsgspecError, TypeError) as e:
             header = FrameHeader(
                 status=StatusCode.INVALID_PAYLOAD,
                 request_id=req.request_id,
@@ -572,7 +573,7 @@ class ServerDaemon:
         """Unpack payload, execute blocking action on thread pool executor, and respond."""
         try:
             payload = unpack_payload(req.payload_bytes, payload_type)
-        except Exception as e:
+        except (msgspec.MsgspecError, TypeError) as e:
             return await self._send_error(req, StatusCode.INVALID_PAYLOAD, f"Invalid {payload_type.__name__}: {e}")
 
         loop = asyncio.get_running_loop()
