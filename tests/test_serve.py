@@ -15,7 +15,7 @@ import vapoursynth as vs
 import zmq
 from vsengine.policy import Policy
 
-from vsremote.cli import _setup_windows_ctrl_handler, app, keygen, serve
+from vsremote.cli import app, keygen, serve
 from vsremote.client import RemoteClient, source
 
 if TYPE_CHECKING:
@@ -212,20 +212,22 @@ async def test_windows_ctrl_handler(monkeypatch: pytest.MonkeyPatch) -> None:
         return True
 
     if sys.platform == "win32":
+        from vsremote.cli import _windows_ctrl_handler
+
         monkeypatch.setattr(ctypes.windll.kernel32, "SetConsoleCtrlHandler", mock_set_console_ctrl_handler)
-    cleanup = _setup_windows_ctrl_handler(asyncio.get_running_loop(), on_stop)
-    assert len(handlers) == 1
-    handler = handlers[0]
+        cleanup = _windows_ctrl_handler(asyncio.get_running_loop(), on_stop)
+        assert len(handlers) == 1
+        handler = handlers[0]
 
-    # Simulate CTRL_C_EVENT (0)
-    assert bool(handler(signal.CTRL_C_EVENT)) is True
-    await asyncio.sleep(0)
-    assert called
+        # Simulate CTRL_C_EVENT (0)
+        assert bool(handler(signal.CTRL_C_EVENT)) is True
+        await asyncio.sleep(0)
+        assert called
 
-    # Ctrl+Break returns 0/False so default handler can force-terminate
-    assert bool(handler(signal.CTRL_BREAK_EVENT)) is False
+        # Ctrl+Break returns 0/False so default handler can force-terminate
+        assert bool(handler(signal.CTRL_BREAK_EVENT)) is False
 
-    # Non-exit event (e.g. 3) returns 0/False
-    assert bool(handler(3)) is False
+        # Non-exit event (e.g. 3) returns 0/False
+        assert bool(handler(3)) is False
 
-    cleanup()
+        cleanup()

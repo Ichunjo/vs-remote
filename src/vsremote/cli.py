@@ -13,15 +13,7 @@ import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any
-
-if sys.platform == "win32":
-    import ctypes
-    import ctypes.wintypes
-
-    signals = (signal.CTRL_C_EVENT, signal.CTRL_BREAK_EVENT, signal.SIGINT)
-else:
-    ctypes = ctypes.wintypes = signals = Any
+from typing import Annotated
 
 import msgspec
 import vapoursynth as vs
@@ -151,7 +143,7 @@ def serve(
             if threading.current_thread() is threading.main_thread():
                 loop = asyncio.get_running_loop()
                 if sys.platform == "win32":
-                    cleanup_signals = _setup_windows_ctrl_handler(loop, lambda: _stop_callback(daemon, shutdown_tasks))
+                    cleanup_signals = _windows_ctrl_handler(loop, lambda: _stop_callback(daemon, shutdown_tasks))
                 else:
                     loop.add_signal_handler(signal.SIGINT, _stop_callback, daemon, shutdown_tasks)
                     loop.add_signal_handler(signal.SIGTERM, _stop_callback, daemon, shutdown_tasks)
@@ -444,25 +436,33 @@ def _stop_callback(daemon: ServerDaemon, shutdown_tasks: set[asyncio.Task[None]]
     task.add_done_callback(shutdown_tasks.discard)
 
 
-def _setup_windows_ctrl_handler(loop: asyncio.AbstractEventLoop, on_stop: Callable[[], object]) -> Callable[[], None]:
-    called = False
+if sys.platform == "win32":
+    import ctypes
+    import ctypes.wintypes
 
-    @ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.DWORD)
-    def handler(ctrl_type: int) -> bool:
-        nonlocal called
-        # 0: CTRL_C_EVENT, 1: CTRL_BREAK_EVENT, 2: CTRL_CLOSE_EVENT
-        if ctrl_type not in signals or called or loop.is_closed():
-            return False
+    def _windows_ctrl_handler(loop: asyncio.AbstractEventLoop, on_stop: Callable[[], object]) -> Callable[[], None]:
+        called = False
 
-        called = True
-        loop.call_soon_threadsafe(on_stop)
-        return True
+        @ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.DWORD)
+        def handler(ctrl_type: int) -> bool:
+            nonlocal called
+            # 0: CTRL_C_EVENT, 1: CTRL_BREAK_EVENT, 2: CTRL_CLOSE_EVENT
+            if (
+                ctrl_type not in (signal.CTRL_C_EVENT, signal.CTRL_BREAK_EVENT, signal.SIGINT)
+                or called
+                or loop.is_closed()
+            ):
+                return False
 
-    return (
-        (lambda: ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, False))
-        if ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True)
-        else lambda: None
-    )
+            called = True
+            loop.call_soon_threadsafe(on_stop)
+            return True
+
+        return (
+            (lambda: ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, False))
+            if ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True)
+            else lambda: None
+        )
 
 
 def _get_y4m_header(info: ClipInfo) -> bytes:
