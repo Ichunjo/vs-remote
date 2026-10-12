@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from logging import getLogger
+from typing import TYPE_CHECKING, Any, get_origin
 
 if TYPE_CHECKING:
     from .protocol import StatusCode
+
+
+logger = getLogger(__name__)
 
 
 class VSRemoteError(Exception):
@@ -80,10 +84,16 @@ class RemoteError(VSRemoteError):
         return self._payload_attribute("frames", list[Any], list[Any]())
 
     def _payload_attribute[T0, T1](self, name: str, t: type[T0], fallback: T1) -> T0 | T1:
-        if (val := getattr(self.payload, name, None)) is not None:
+        resolved_type = get_origin(t) or t
+        if (val := getattr(self.payload, name, None)) is not None and isinstance(val, resolved_type):
             return val
-        if isinstance(self.payload, dict) and (val := self.payload.get(name)) is not None:
+        if (
+            isinstance(self.payload, dict)
+            and (val := self.payload.get(name)) is not None
+            and isinstance(val, resolved_type)
+        ):
             return val
+        logger.debug("Fallbacking to %s for %s", fallback, name)
         return fallback
 
 
