@@ -11,7 +11,7 @@ import signal
 import sys
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -137,23 +137,28 @@ def serve(
         )
 
         async def run() -> None:
-            if sys.platform != "win32" and threading.current_thread() is threading.main_thread():
-                loop = asyncio.get_running_loop()
-                loop.add_signal_handler(signal.SIGINT, lambda: asyncio.create_task(daemon.stop()))
-                loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(daemon.stop()))
+            cleanup_signals: Callable[[], None] | None = None
+            shutdown_tasks = set[asyncio.Task[None]]()
 
-                wakeup_task = None
-            else:
-                wakeup_task = asyncio.create_task(_wakeup(), name="wakeup")
+            if threading.current_thread() is threading.main_thread():
+                loop = asyncio.get_running_loop()
+                if sys.platform == "win32":
+                    cleanup_signals = _setup_windows_ctrl_handler(loop, lambda: _stop_callback(daemon, shutdown_tasks))
+                else:
+                    loop.add_signal_handler(signal.SIGINT, _stop_callback, daemon, shutdown_tasks)
+                    loop.add_signal_handler(signal.SIGTERM, _stop_callback, daemon, shutdown_tasks)
 
             stop_task = asyncio.create_task(_watch_stop(daemon, stop_event), name="watch_stop") if stop_event else None
+
             try:
                 await daemon.start(ready_event=ready_event)
             finally:
-                if wakeup_task:
-                    wakeup_task.cancel()
+                if cleanup_signals:
+                    cleanup_signals()
                 if stop_task:
                     stop_task.cancel()
+                if shutdown_tasks:
+                    await asyncio.gather(*shutdown_tasks, return_exceptions=True)
 
         try:
             asyncio.run(run(), loop_factory=asyncio.SelectorEventLoop)
@@ -409,15 +414,50 @@ def main() -> None:
 
 
 async def _watch_stop(daemon: ServerDaemon, stop_event: threading.Event | asyncio.Event) -> None:
-    while not stop_event.is_set():  # noqa: ASYNC110
-        await asyncio.sleep(0.5)
+    if isinstance(stop_event, asyncio.Event):
+        await stop_event.wait()
+    else:
+        loop = asyncio.get_running_loop()
+        async_event = asyncio.Event()
+
+        def bridge() -> None:
+            stop_event.wait()
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(async_event.set)
+
+        threading.Thread(target=bridge, daemon=True, name="vsremote-stop-bridge").start()
+        await async_event.wait()
     await daemon.stop()
 
 
-async def _wakeup() -> None:
-    # Heartbeat required on Windows to process SIGINT
-    while True:  # noqa: ASYNC110
-        await asyncio.sleep(0.5)
+def _stop_callback(daemon: ServerDaemon, shutdown_tasks: set[asyncio.Task[None]]) -> None:
+    task = asyncio.create_task(daemon.stop())
+    shutdown_tasks.add(task)
+    task.add_done_callback(shutdown_tasks.discard)
+
+
+def _setup_windows_ctrl_handler(loop: asyncio.AbstractEventLoop, on_stop: Callable[[], object]) -> Callable[[], None]:
+    import ctypes
+    import ctypes.wintypes
+
+    called = False
+
+    @ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.DWORD)
+    def handler(ctrl_type: int) -> bool:
+        nonlocal called
+        # 0: CTRL_C_EVENT, 1: CTRL_BREAK_EVENT, 2: CTRL_CLOSE_EVENT
+        if ctrl_type not in (signal.CTRL_C_EVENT, signal.CTRL_BREAK_EVENT, signal.SIGINT) or called or loop.is_closed():
+            return False
+
+        called = True
+        loop.call_soon_threadsafe(on_stop)
+        return True
+
+    return (
+        (lambda: ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, False))
+        if ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True)
+        else lambda: None
+    )
 
 
 def _get_y4m_header(info: ClipInfo) -> bytes:

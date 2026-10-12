@@ -4,6 +4,7 @@ import asyncio
 import io
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
@@ -333,12 +334,13 @@ def test_serve_curve_auto_keygen(tmp_path: Path, vpy_policy: Policy, port: int) 
 
 
 @pytest.mark.asyncio
-async def test_watch_stop_event_triggered() -> None:
+@pytest.mark.parametrize("event_factory", [threading.Event, asyncio.Event])
+async def test_watch_stop_event_triggered(event_factory: Callable[[], threading.Event | asyncio.Event]) -> None:
     """Test that _watch_stop triggers daemon.stop when stop_event is set."""
     mock_daemon = MagicMock(spec=ServerDaemon)
     mock_daemon.stop = AsyncMock()
 
-    stop_event = threading.Event()
+    stop_event = event_factory()
     task = asyncio.create_task(_watch_stop(mock_daemon, stop_event))
 
     await asyncio.sleep(0.01)
@@ -350,12 +352,13 @@ async def test_watch_stop_event_triggered() -> None:
 
 
 @pytest.mark.asyncio
-async def test_watch_stop_cancellation_safe() -> None:
+@pytest.mark.parametrize("event_factory", [threading.Event, asyncio.Event])
+async def test_watch_stop_cancellation_safe(event_factory: Callable[[], threading.Event | asyncio.Event]) -> None:
     """Test that _watch_stop cancels cleanly without leaking threads or calling daemon.stop."""
     mock_daemon = MagicMock(spec=ServerDaemon)
     mock_daemon.stop = AsyncMock()
 
-    stop_event = threading.Event()
+    stop_event = event_factory()
     task = asyncio.create_task(_watch_stop(mock_daemon, stop_event))
 
     await asyncio.sleep(0.01)

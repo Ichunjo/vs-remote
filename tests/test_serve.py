@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import inspect
+import signal
 import sys
 import threading
 from collections.abc import Awaitable
@@ -13,7 +15,7 @@ import vapoursynth as vs
 import zmq
 from vsengine.policy import Policy
 
-from vsremote.cli import app, keygen, serve
+from vsremote.cli import _setup_windows_ctrl_handler, app, keygen, serve
 from vsremote.client import RemoteClient, source
 
 if TYPE_CHECKING:
@@ -164,10 +166,9 @@ def test_serve_keyboard_interrupt(port: int, tmp_path: Path, monkeypatch: pytest
     serve(script_file, address=f"tcp://{HOST}:{port}")
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal handling in worker thread test")
 @pytest.mark.vpy("no-core")
-def test_serve_in_thread_posix(tmp_path: Path, vpy_policy: Policy, port: int) -> None:
-    """Test that serve runs cleanly in a background thread on POSIX platforms without signal handler errors."""
+def test_serve_in_thread(tmp_path: Path, vpy_policy: Policy, port: int) -> None:
+    """Test that serve runs cleanly in a background thread without signal handler errors."""
     script_file = tmp_path / "thread_test.vpy"
     script_file.write_text(
         "import vapoursynth as vs\ncore = vs.core\nclip = core.std.BlankClip()\nclip.set_output(0)\n",
@@ -191,3 +192,39 @@ def test_serve_in_thread_posix(tmp_path: Path, vpy_policy: Policy, port: int) ->
     assert ready_event.wait(timeout=5.0)
     stop_event.set()
     t.join(timeout=3.0)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Console Ctrl Handler test")
+@pytest.mark.asyncio
+async def test_windows_ctrl_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test Windows console control handler registration, signal dispatching, and cleanup."""
+    called = False
+
+    def on_stop() -> None:
+        nonlocal called
+        called = True
+
+    handlers = list[Any]()
+
+    def mock_set_console_ctrl_handler(handler: Any, add: bool) -> bool:
+        if add:
+            handlers.append(handler)
+        return True
+
+    monkeypatch.setattr(ctypes.windll.kernel32, "SetConsoleCtrlHandler", mock_set_console_ctrl_handler)
+    cleanup = _setup_windows_ctrl_handler(asyncio.get_running_loop(), on_stop)
+    assert len(handlers) == 1
+    handler = handlers[0]
+
+    # Simulate CTRL_C_EVENT (0)
+    assert bool(handler(signal.CTRL_C_EVENT)) is True
+    await asyncio.sleep(0)
+    assert called
+
+    # Ctrl+Break returns 0/False so default handler can force-terminate
+    assert bool(handler(signal.CTRL_BREAK_EVENT)) is False
+
+    # Non-exit event (e.g. 3) returns 0/False
+    assert bool(handler(3)) is False
+
+    cleanup()
