@@ -20,7 +20,6 @@ from ..protocol import (
     OutputItem,
     RemoteLogRecord,
     ServerStats,
-    StatusCode,
     StreamEvent,
     StreamOutputEvent,
     decompress_plane,
@@ -602,10 +601,9 @@ def create_remote_vnode(
         except TimeoutError as exc:
             raise RemoteTimeoutError(f"Timed out fetching remote frame (n={n}, output={output_index})") from exc
 
-        if header.status != StatusCode.OK:
-            header.status.raise_for_status(
-                f"Failed to fetch remote frame (n={n}, output={output_index}):\n{header.error_message}"
-            )
+        header.status.raise_for_status(
+            f"Failed to fetch remote frame (n={n}, output={output_index}):\n{header.error_message}"
+        )
 
         f_out = f.copy()
 

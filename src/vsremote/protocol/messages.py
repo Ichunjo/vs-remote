@@ -57,7 +57,7 @@ class ResponseEnvelope[T](msgspec.Struct, frozen=True):
     payload_bytes: bytes = b""
     extra_frames: list[bytes] = msgspec.field(default_factory=list)
 
-    def raise_for_status(self, context_msg: str | None = None) -> Self:  # noqa: RET503
+    def raise_for_status(self, context_msg: str | None = None) -> Self:
         """Raise the corresponding RemoteError if the response status is not OK."""
         if self.status == StatusCode.OK:
             return self
@@ -72,6 +72,7 @@ class ResponseEnvelope[T](msgspec.Struct, frozen=True):
         msg = f"{context_msg}: {err_text}" if context_msg and not err_text.startswith(context_msg) else err_text
 
         self.status.raise_for_status(msg, payload=self.payload)
+        return self
 
     @overload
     @classmethod

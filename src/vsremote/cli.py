@@ -23,7 +23,7 @@ from vsengine import ManagedEnvironment, Policy, UnifiedFuture
 
 from .client.transport import ClientTransport
 from .exceptions import RemoteError, TransportError, UnsupportedFormatError
-from .protocol import DEFAULT_ADDRESS, ClipInfo, Compression, FrameHeader, ServerStats, StatusCode, decompress_plane
+from .protocol import DEFAULT_ADDRESS, ClipInfo, Compression, FrameHeader, ServerStats, decompress_plane
 from .server import ScriptRunner, ServerDaemon
 from .utils import console, setup_logging
 
@@ -272,9 +272,7 @@ def pipe(
                 fut = transport.request_frame(output, n, compression=compression)
 
             header, plane_parts = fut.result(timeout=timeout)
-
-            if header.status != StatusCode.OK:
-                header.status.raise_for_status(f"Failed to fetch frame {n}: {header.error_message}")
+            header.status.raise_for_status(f"Failed to fetch frame {n}: {header.error_message}")
 
             if y4m:
                 stdout_buf.write(b"FRAME\n")

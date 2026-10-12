@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import IntEnum
-from typing import Any, Literal, NoReturn, Self
+from typing import Any, Literal, Self
 
 from ..exceptions import (
     RemoteAuthenticationError,
@@ -67,9 +67,9 @@ class StatusCode(IntEnum):
         obj.exception_cls = exception_cls
         return obj
 
-    def raise_for_status(self: StatusCodeError, message: str, payload: Any = None) -> NoReturn:  # type: ignore[misc]
+    def raise_for_status(self, message: str, payload: Any = None) -> Self:
         """Raise the corresponding RemoteError if this status code represents an error."""
-        if not self.exception_cls:
-            raise NotImplementedError
+        if self == StatusCode.OK or not self.exception_cls:
+            return self
 
         raise self.exception_cls(message, status=self, payload=payload)
