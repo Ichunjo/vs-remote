@@ -13,7 +13,15 @@ import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any
+
+if sys.platform == "win32":
+    import ctypes
+    import ctypes.wintypes
+
+    signals = (signal.CTRL_C_EVENT, signal.CTRL_BREAK_EVENT, signal.SIGINT)
+else:
+    ctypes = ctypes.wintypes = signals = Any
 
 import msgspec
 import vapoursynth as vs
@@ -437,16 +445,13 @@ def _stop_callback(daemon: ServerDaemon, shutdown_tasks: set[asyncio.Task[None]]
 
 
 def _setup_windows_ctrl_handler(loop: asyncio.AbstractEventLoop, on_stop: Callable[[], object]) -> Callable[[], None]:
-    import ctypes
-    import ctypes.wintypes
-
     called = False
 
     @ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.DWORD)
     def handler(ctrl_type: int) -> bool:
         nonlocal called
         # 0: CTRL_C_EVENT, 1: CTRL_BREAK_EVENT, 2: CTRL_CLOSE_EVENT
-        if ctrl_type not in (signal.CTRL_C_EVENT, signal.CTRL_BREAK_EVENT, signal.SIGINT) or called or loop.is_closed():
+        if ctrl_type not in signals or called or loop.is_closed():
             return False
 
         called = True
