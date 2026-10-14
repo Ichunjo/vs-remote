@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 import io
 import sys
 import threading
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import vapoursynth as vs
@@ -15,11 +12,10 @@ from rich.console import Console
 from vsengine.futures import UnifiedFuture
 from vsengine.policy import Policy
 
-from vsremote.cli import ClientConfig, _get_y4m_header, _watch_stop, app, info, keygen, ping, pipe, serve
+from vsremote.cli import ClientConfig, _get_y4m_header, app, info, keygen, ping, pipe, serve
 from vsremote.client import ClientTransport
 from vsremote.exceptions import RemoteExecutionError, UnsupportedFormatError
 from vsremote.protocol import ClipInfo, FrameHeader, PlaneInfo, StatusCode
-from vsremote.server import ServerDaemon
 
 if TYPE_CHECKING:
     from conftest import ServerFactory
@@ -331,38 +327,3 @@ def test_serve_curve_auto_keygen(tmp_path: Path, vpy_policy: Policy, port: int) 
     )
     thread.join(timeout=2.0)
     assert ready_event.is_set()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("event_factory", [threading.Event, asyncio.Event])
-async def test_watch_stop_event_triggered(event_factory: Callable[[], threading.Event | asyncio.Event]) -> None:
-    """Test that _watch_stop triggers daemon.stop when stop_event is set."""
-    mock_daemon = MagicMock(spec=ServerDaemon)
-    mock_daemon.stop = AsyncMock()
-
-    stop_event = event_factory()
-    task = asyncio.create_task(_watch_stop(mock_daemon, stop_event))
-
-    await asyncio.sleep(0.01)
-    mock_daemon.stop.assert_not_called()
-
-    stop_event.set()
-    await asyncio.wait_for(task, timeout=1.0)
-    mock_daemon.stop.assert_called_once()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("event_factory", [threading.Event, asyncio.Event])
-async def test_watch_stop_cancellation_safe(event_factory: Callable[[], threading.Event | asyncio.Event]) -> None:
-    """Test that _watch_stop cancels cleanly without leaking threads or calling daemon.stop."""
-    mock_daemon = MagicMock(spec=ServerDaemon)
-    mock_daemon.stop = AsyncMock()
-
-    stop_event = event_factory()
-    task = asyncio.create_task(_watch_stop(mock_daemon, stop_event))
-
-    await asyncio.sleep(0.01)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    mock_daemon.stop.assert_not_called()

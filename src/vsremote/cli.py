@@ -138,32 +138,88 @@ def serve(
 
         async def run() -> None:
             cleanup_signals: Callable[[], None] | None = None
-            shutdown_tasks = set[asyncio.Task[None]]()
+            shutdown_event = asyncio.Event()
 
             if threading.current_thread() is threading.main_thread():
                 loop = asyncio.get_running_loop()
                 if sys.platform == "win32":
-                    cleanup_signals = _windows_ctrl_handler(loop, lambda: _stop_callback(daemon, shutdown_tasks))
+                    cleanup_signals = _windows_ctrl_handler(loop, shutdown_event.set)
                 else:
-                    loop.add_signal_handler(signal.SIGINT, _stop_callback, daemon, shutdown_tasks)
-                    loop.add_signal_handler(signal.SIGTERM, _stop_callback, daemon, shutdown_tasks)
+                    loop.add_signal_handler(signal.SIGINT, shutdown_event.set)
+                    loop.add_signal_handler(signal.SIGTERM, shutdown_event.set)
 
-            stop_task = asyncio.create_task(_watch_stop(daemon, stop_event), name="watch_stop") if stop_event else None
+            bridge_task = _bridge_stop_event(stop_event, shutdown_event) if stop_event is not None else None
+
+            async def watch_shutdown() -> None:
+                await shutdown_event.wait()
+                await daemon.stop()
+
+            stop_task = asyncio.create_task(watch_shutdown(), name="watch_shutdown")
 
             try:
                 await daemon.start(ready_event=ready_event)
             finally:
                 if cleanup_signals:
                     cleanup_signals()
-                if stop_task:
-                    stop_task.cancel()
-                if shutdown_tasks:
-                    await asyncio.gather(*shutdown_tasks, return_exceptions=True)
+                stop_task.cancel()
+                if bridge_task is not None:
+                    bridge_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await stop_task
 
         try:
             asyncio.run(run(), loop_factory=asyncio.SelectorEventLoop)
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt received, shutting down server...")
+
+
+def _bridge_stop_event(stop_event: threading.Event | asyncio.Event, target: asyncio.Event) -> asyncio.Task[None] | None:
+    loop = asyncio.get_running_loop()
+
+    if isinstance(stop_event, asyncio.Event):
+
+        async def wait_and_set() -> None:
+            await stop_event.wait()
+            target.set()
+
+        return loop.create_task(wait_and_set())
+
+    def bridge() -> None:
+        stop_event.wait()
+        if not loop.is_closed():
+            loop.call_soon_threadsafe(target.set)
+
+    threading.Thread(target=bridge, daemon=True, name="vsremote-stop-bridge").start()
+    return None
+
+
+if sys.platform == "win32":
+    import ctypes
+    import ctypes.wintypes
+
+    def _windows_ctrl_handler(loop: asyncio.AbstractEventLoop, on_stop: Callable[[], object]) -> Callable[[], None]:
+        called = False
+
+        @ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.DWORD)
+        def handler(ctrl_type: int) -> bool:
+            nonlocal called
+            # 0: CTRL_C_EVENT, 1: CTRL_BREAK_EVENT, 2: CTRL_CLOSE_EVENT
+            if (
+                ctrl_type not in (signal.CTRL_C_EVENT, signal.CTRL_BREAK_EVENT, signal.SIGINT)
+                or called
+                or loop.is_closed()
+            ):
+                return False
+
+            called = True
+            loop.call_soon_threadsafe(on_stop)
+            return True
+
+        return (
+            (lambda: ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, False))
+            if ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True)
+            else lambda: None
+        )
 
 
 @app.command
@@ -411,58 +467,6 @@ def main_meta(*tokens: Annotated[str, Parameter(show=False, allow_leading_hyphen
 
 def main() -> None:
     app.meta()
-
-
-async def _watch_stop(daemon: ServerDaemon, stop_event: threading.Event | asyncio.Event) -> None:
-    if isinstance(stop_event, asyncio.Event):
-        await stop_event.wait()
-    else:
-        loop = asyncio.get_running_loop()
-        async_event = asyncio.Event()
-
-        def bridge() -> None:
-            stop_event.wait()
-            if not loop.is_closed():
-                loop.call_soon_threadsafe(async_event.set)
-
-        threading.Thread(target=bridge, daemon=True, name="vsremote-stop-bridge").start()
-        await async_event.wait()
-    await daemon.stop()
-
-
-def _stop_callback(daemon: ServerDaemon, shutdown_tasks: set[asyncio.Task[None]]) -> None:
-    task = asyncio.create_task(daemon.stop())
-    shutdown_tasks.add(task)
-    task.add_done_callback(shutdown_tasks.discard)
-
-
-if sys.platform == "win32":
-    import ctypes
-    import ctypes.wintypes
-
-    def _windows_ctrl_handler(loop: asyncio.AbstractEventLoop, on_stop: Callable[[], object]) -> Callable[[], None]:
-        called = False
-
-        @ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.DWORD)
-        def handler(ctrl_type: int) -> bool:
-            nonlocal called
-            # 0: CTRL_C_EVENT, 1: CTRL_BREAK_EVENT, 2: CTRL_CLOSE_EVENT
-            if (
-                ctrl_type not in (signal.CTRL_C_EVENT, signal.CTRL_BREAK_EVENT, signal.SIGINT)
-                or called
-                or loop.is_closed()
-            ):
-                return False
-
-            called = True
-            loop.call_soon_threadsafe(on_stop)
-            return True
-
-        return (
-            (lambda: ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, False))
-            if ctypes.windll.kernel32.SetConsoleCtrlHandler(handler, True)
-            else lambda: None
-        )
 
 
 def _get_y4m_header(info: ClipInfo) -> bytes:

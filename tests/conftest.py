@@ -121,13 +121,12 @@ class ServerContext:
                 auth_token=self.auth_token,
                 **self.daemon_kwargs,
             )
-            self._loop = asyncio.SelectorEventLoop()
 
             def run() -> None:
-                assert self._loop
                 assert self._sync_daemon
-                asyncio.set_event_loop(self._loop)
-                self._loop.run_until_complete(self._sync_daemon.start(ready_event=ready_event))
+                with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:
+                    self._loop = runner.get_loop()
+                    runner.run(self._sync_daemon.start(ready_event=ready_event))
 
             self._thread = threading.Thread(target=run, name="ServerContextThread", daemon=True)
 
@@ -146,8 +145,7 @@ class ServerContext:
         if self._thread:
             self._thread.join(timeout=3.0)
 
-        if self._loop and not self._loop.is_closed():
-            self._loop.close()
+        self._loop = None
 
         if self._runner:
             self._runner.close()
