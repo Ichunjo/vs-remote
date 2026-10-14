@@ -198,12 +198,7 @@ def test_serve_in_thread(tmp_path: Path, vpy_policy: Policy, port: int) -> None:
 @pytest.mark.asyncio
 async def test_windows_ctrl_handler(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test Windows console control handler registration, signal dispatching, and cleanup."""
-    called = False
-
-    def on_stop() -> None:
-        nonlocal called
-        called = True
-
+    event = asyncio.Event()
     handlers = list[Any]()
 
     def mock_set_console_ctrl_handler(handler: Any, add: bool) -> bool:
@@ -215,14 +210,15 @@ async def test_windows_ctrl_handler(monkeypatch: pytest.MonkeyPatch) -> None:
         from vsremote.cli import _windows_ctrl_handler
 
         monkeypatch.setattr(ctypes.windll.kernel32, "SetConsoleCtrlHandler", mock_set_console_ctrl_handler)
-        cleanup = _windows_ctrl_handler(asyncio.get_running_loop(), on_stop)
+        cleanup = _windows_ctrl_handler(asyncio.get_running_loop(), event.set)
         assert len(handlers) == 1
         handler = handlers[0]
 
         # Simulate CTRL_C_EVENT (0)
         assert bool(handler(signal.CTRL_C_EVENT)) is True
-        await asyncio.sleep(0)
-        assert called
+
+        async with asyncio.timeout(1.0):
+            await event.wait()
 
         # Ctrl+Break returns 0/False so default handler can force-terminate
         assert bool(handler(signal.CTRL_BREAK_EVENT)) is False
