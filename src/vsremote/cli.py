@@ -92,8 +92,8 @@ def serve(
         Parameter(env_var="VSREMOTE_CURVE_ALLOWED_KEYS", consume_multiple=True),
     ] = None,
     # Not exposed to the CLI
-    ready_event: Annotated[threading.Event | asyncio.Event | None, Parameter(parse=False)] = None,
-    stop_event: Annotated[threading.Event | asyncio.Event | None, Parameter(parse=False)] = None,
+    ready_event: Annotated[threading.Event | None, Parameter(parse=False)] = None,
+    stop_event: Annotated[threading.Event | None, Parameter(parse=False)] = None,
     environment: Annotated[Policy | ManagedEnvironment | None, Parameter(parse=False)] = None,
 ) -> None:
     """
@@ -137,24 +137,30 @@ def serve(
         )
 
         async def run() -> None:
+            loop = asyncio.get_running_loop()
             cleanup_signals: Callable[[], None] | None = None
             shutdown_event = asyncio.Event()
 
             if threading.current_thread() is threading.main_thread():
-                loop = asyncio.get_running_loop()
                 if sys.platform == "win32":
                     cleanup_signals = _windows_ctrl_handler(loop, shutdown_event.set)
                 else:
                     loop.add_signal_handler(signal.SIGINT, shutdown_event.set)
                     loop.add_signal_handler(signal.SIGTERM, shutdown_event.set)
 
-            bridge_task = _bridge_stop_event(stop_event, shutdown_event) if stop_event is not None else None
+            if stop_event is not None:
+                threading.Thread(
+                    target=_bridge_stop_event,
+                    args=(loop, stop_event, shutdown_event),
+                    daemon=True,
+                    name="vsremote-stop-bridge",
+                ).start()
 
             async def watch_shutdown() -> None:
                 await shutdown_event.wait()
                 await daemon.stop()
 
-            stop_task = asyncio.create_task(watch_shutdown(), name="watch_shutdown")
+            stop_task = asyncio.create_task(watch_shutdown())
 
             try:
                 await daemon.start(ready_event=ready_event)
@@ -162,8 +168,6 @@ def serve(
                 if cleanup_signals:
                     cleanup_signals()
                 stop_task.cancel()
-                if bridge_task is not None:
-                    bridge_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await stop_task
 
@@ -173,24 +177,10 @@ def serve(
             logger.info("Keyboard interrupt received, shutting down server...")
 
 
-def _bridge_stop_event(stop_event: threading.Event | asyncio.Event, target: asyncio.Event) -> asyncio.Task[None] | None:
-    loop = asyncio.get_running_loop()
-
-    if isinstance(stop_event, asyncio.Event):
-
-        async def wait_and_set() -> None:
-            await stop_event.wait()
-            target.set()
-
-        return loop.create_task(wait_and_set())
-
-    def bridge() -> None:
-        stop_event.wait()
-        if not loop.is_closed():
-            loop.call_soon_threadsafe(target.set)
-
-    threading.Thread(target=bridge, daemon=True, name="vsremote-stop-bridge").start()
-    return None
+def _bridge_stop_event(loop: asyncio.AbstractEventLoop, stop_event: threading.Event, target: asyncio.Event) -> None:
+    stop_event.wait()
+    if not loop.is_closed():
+        loop.call_soon_threadsafe(target.set)
 
 
 if sys.platform == "win32":
