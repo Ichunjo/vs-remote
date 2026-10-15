@@ -18,7 +18,7 @@ def test_zstd_compression_roundtrip() -> None:
     compressed = compress_plane(original, "zstd")
     assert len(compressed) < len(original)
 
-    decompressed = decompress_plane(compressed, len(original), "zstd")
+    decompressed = decompress_plane(compressed, "zstd")
     assert decompressed == original
 
 
@@ -27,7 +27,7 @@ def test_none_compression_roundtrip() -> None:
     compressed = compress_plane(original, "none")
     assert compressed == original
 
-    decompressed = decompress_plane(compressed, len(original), "none")
+    decompressed = decompress_plane(compressed, "none")
     assert decompressed == original
 
 
@@ -36,7 +36,7 @@ def test_memoryview_compression() -> None:
     mv = memoryview(original)
 
     compressed = compress_plane(mv, "zstd")
-    decompressed = decompress_plane(compressed, len(original), "zstd")
+    decompressed = decompress_plane(compressed, "zstd")
 
     assert decompressed == bytes(original)
 
@@ -50,7 +50,7 @@ def test_non_contiguous_plane_compression() -> None:
     assert not p0.c_contiguous
 
     compressed = compress_plane(p0, "zstd")
-    decompressed = decompress_plane(compressed, p0.nbytes, "zstd")
+    decompressed = decompress_plane(compressed, "zstd")
     assert decompressed == p0.tobytes()
 
     uncompressed = compress_plane(p0, "none")

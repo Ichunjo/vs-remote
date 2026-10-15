@@ -329,7 +329,7 @@ def pipe(
                 stdout_buf.write(b"FRAME\n")
 
             for p, compressed in enumerate(plane_parts):
-                decompressed = decompress_plane(compressed, clip_info.planes[p].size_bytes, header.compression)
+                decompressed = decompress_plane(compressed, header.compression)
                 stdout_buf.write(decompressed)
 
             stdout_buf.flush()

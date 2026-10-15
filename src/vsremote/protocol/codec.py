@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import sys
 import threading
 from collections.abc import Mapping
 from typing import Any
 
 import msgspec
-import zstandard as zstd
 from typing_extensions import TypeForm
+
+if sys.version_info >= (3, 14):
+    from compression import zstd
+else:
+    from backports import zstd
 
 from .constants import Compression
 
@@ -16,17 +21,9 @@ _ZSTD_LOCAL = threading.local()
 def _get_zstd_compressor() -> zstd.ZstdCompressor:
     compressor = getattr(_ZSTD_LOCAL, "compressor", None)
     if compressor is None:
-        compressor = zstd.ZstdCompressor(level=-1, threads=0)
+        compressor = zstd.ZstdCompressor(level=-1)
         _ZSTD_LOCAL.compressor = compressor
     return compressor
-
-
-def _get_zstd_decompressor() -> zstd.ZstdDecompressor:
-    decompressor = getattr(_ZSTD_LOCAL, "decompressor", None)
-    if decompressor is None:
-        decompressor = zstd.ZstdDecompressor()
-        _ZSTD_LOCAL.decompressor = decompressor
-    return decompressor
 
 
 def sanitize_props(props: Mapping[str, Any]) -> dict[str, Any]:
@@ -77,12 +74,12 @@ def compress_plane(data: bytes | memoryview, mode: Compression) -> bytes:
 
     match mode:
         case "zstd":
-            return _get_zstd_compressor().compress(data)
+            return _get_zstd_compressor().compress(data, mode=zstd.ZstdCompressor.FLUSH_FRAME)
         case "none":
             return bytes(data) if isinstance(data, memoryview) else data
 
 
-def decompress_plane(data: bytes, uncompressed_size: int, mode: Compression) -> bytes:
+def decompress_plane(data: bytes, mode: Compression) -> bytes:
     """
     Decompress planar image bytes using the specified compression mode.
 
@@ -96,6 +93,6 @@ def decompress_plane(data: bytes, uncompressed_size: int, mode: Compression) -> 
     """
     match mode:
         case "zstd":
-            return _get_zstd_decompressor().decompress(data, max_output_size=uncompressed_size)
+            return zstd.decompress(data)
         case "none":
             return data

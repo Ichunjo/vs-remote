@@ -35,7 +35,7 @@ dependencies = [
     "vapoursynth>=79",
     "vsjetengine>=1.7.0",
     "pyzmq>=27.1.0",
-    "zstandard>=0.25.0",
+    "backports.zstd>=1.8.0 ; python_version<='3.13'",
     "msgspec>=0.21.1",
     "cyclopts>=4.23.3",
     "rich>=15.0.0",

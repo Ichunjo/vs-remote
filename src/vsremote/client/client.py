@@ -616,7 +616,7 @@ def create_remote_vnode(
 
             copy_plane(
                 f_out.get_write_ptr(p).value,
-                decompress_plane(plane_parts[p], plane_info.size_bytes, header.compression),
+                decompress_plane(plane_parts[p], header.compression),
                 plane_info.width,
                 plane_info.height,
                 plane_info.bytes_per_sample,
