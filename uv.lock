@@ -778,7 +778,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "backports-zstd", marker = "python_full_version < '3.14'", specifier = ">=1.8.0" },
-    { name = "cyclopts", specifier = ">=4.23.3" },
+    { name = "cyclopts", specifier = ">=5.2.0" },
     { name = "msgspec", specifier = ">=0.21.1" },
     { name = "psutil", specifier = ">=7.0.0" },
     { name = "pyzmq", specifier = ">=27.1.0" },
