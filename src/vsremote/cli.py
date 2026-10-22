@@ -95,7 +95,7 @@ def serve(
         Sequence[str] | None,
         Parameter(env_var="VSREMOTE_CURVE_ALLOWED_KEYS", consume_multiple=True),
     ] = None,
-    hwm: Annotated[int, Parameter(help="ZeroMQ High Water Mark for socket buffer queues.")] = 128,
+    hwm: Annotated[int, Parameter(env_var="VSREMOTE_HWM")] = 128,
     # Not exposed to the CLI
     ready_event: Annotated[threading.Event | None, Parameter(parse=False)] = None,
     stop_event: Annotated[threading.Event | None, Parameter(parse=False)] = None,
