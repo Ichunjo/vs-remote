@@ -288,6 +288,7 @@ class RemoteClient:
         prefetch: int = 4,
         backlog: int | None = None,
         timeout: float = 30.0,
+        frame_timeout: float | None = None,
     ) -> vs.VideoNode:
         """
         Create a local VideoNode proxy mirroring a remote output clip.
@@ -298,6 +299,7 @@ class RemoteClient:
             backlog: Maximum number of in-flight and prefetched frame requests buffered
                 (defaults to max(prefetch * 3, prefetch)).
             timeout: Maximum time in seconds to wait for initial clip info and frame fetches (default: 30.0).
+            frame_timeout: Maximum time in seconds to wait for individual frame fetches (defaults to timeout).
 
         Returns:
             A vs.VideoNode that lazily requests and renders frames from the server.
@@ -325,6 +327,7 @@ class RemoteClient:
             prefetch=prefetch,
             backlog=backlog,
             timeout=timeout,
+            frame_timeout=frame_timeout,
         )
 
     def get_outputs(
@@ -332,6 +335,7 @@ class RemoteClient:
         prefetch: int = 4,
         backlog: int | None = None,
         timeout: float = 30.0,
+        frame_timeout: float | None = None,
     ) -> dict[int, vs.VideoNode]:
         """
         Create local VideoNode proxies for all available outputs on the remote server.
@@ -341,6 +345,7 @@ class RemoteClient:
             backlog: Maximum number of in-flight and prefetched frame requests buffered
                 (defaults to max(prefetch * 3, prefetch)).
             timeout: Maximum time in seconds to wait for operations (default: 30.0).
+            frame_timeout: Maximum time in seconds to wait for individual frame fetches (defaults to timeout).
 
         Returns:
             A dictionary mapping output index to its corresponding vs.VideoNode proxy.
@@ -358,7 +363,13 @@ class RemoteClient:
         except TimeoutError as exc:
             raise RemoteTimeoutError("Timed out listing outputs from remote server") from exc
         return {
-            item.index: self.get_output(item.index, prefetch=prefetch, backlog=backlog, timeout=timeout)
+            item.index: self.get_output(
+                item.index,
+                prefetch=prefetch,
+                backlog=backlog,
+                timeout=timeout,
+                frame_timeout=frame_timeout,
+            )
             for item in outputs
         }
 
@@ -444,6 +455,7 @@ def source(
     subscribe_streams: bool = True,
     replay_history: bool = True,
     timeout: float = 30.0,
+    frame_timeout: float | None = None,
     startup_timeout: float = 5.0,
     hwm: int = 64,
     tcp_keepalive: bool = True,
@@ -480,6 +492,7 @@ def source(
         subscribe_streams: Whether to subscribe to remote streams.
         replay_history: Whether to replay historical startup logs upon subscribing.
         timeout: Maximum time in seconds to wait for initial clip info and frame fetches (default: 30.0).
+        frame_timeout: Maximum time in seconds to wait for individual frame fetches (defaults to timeout).
         startup_timeout: Maximum time in seconds to wait for transport initialization (default: 5.0).
         hwm: ZeroMQ High Water Mark for socket buffer queues (default: 64).
         tcp_keepalive: Enable OS-level TCP keepalive probes (default: True).
@@ -543,6 +556,7 @@ def source(
         prefetch=prefetch,
         backlog=backlog,
         timeout=timeout,
+        frame_timeout=frame_timeout,
     )
 
 
@@ -553,6 +567,7 @@ def create_remote_vnode(
     prefetch: int = 4,
     backlog: int | None = None,
     timeout: float = 30.0,
+    frame_timeout: float | None = None,
 ) -> vs.VideoNode:
     """
     Construct a VapourSynth VideoNode that lazily requests and renders frames from a remote server.
@@ -565,6 +580,7 @@ def create_remote_vnode(
         backlog: Maximum number of in-flight and prefetched frame requests buffered
             (defaults to max(prefetch * 3, prefetch)).
         timeout: Maximum time in seconds to wait for initial clip info and frame fetches (default: 30.0).
+        frame_timeout: Maximum time in seconds to wait for individual frame fetches (defaults to timeout).
 
     Returns:
         A standard vs.VideoNode proxy.
@@ -631,8 +647,9 @@ def create_remote_vnode(
                     if next_n not in inflight:
                         inflight[next_n] = transport.request_frame(output_index, next_n, compression=compression)
 
+        wait_timeout = frame_timeout if frame_timeout is not None else timeout
         try:
-            header, plane_parts = fut.result(timeout=timeout)
+            header, plane_parts = fut.result(timeout=wait_timeout)
         except TimeoutError as exc:
             raise RemoteTimeoutError(f"Timed out fetching remote frame (n={n}, output={output_index})") from exc
 
