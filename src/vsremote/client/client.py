@@ -616,11 +616,7 @@ def create_remote_vnode(
     )
 
     prefetch = max(prefetch, 0)
-
-    if backlog is None or backlog < 0:
-        backlog = max(prefetch * 3, prefetch)
-    elif backlog < prefetch:
-        backlog = prefetch
+    backlog = prefetch * 3 if backlog is None or backlog < 0 else max(backlog, prefetch)
 
     inflight = dict[int, UnifiedFuture[tuple[FrameHeader, list[bytes]]]]()
     lock = threading.Lock()
