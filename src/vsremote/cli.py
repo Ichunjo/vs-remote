@@ -54,6 +54,9 @@ class ClientConfig:
     client_id: Annotated[str | None, Parameter(env_var="VSREMOTE_CLIENT_ID")] = None
     """Optional human-readable identity for this client (e.g. 'worker-1' or 'encoder')."""
 
+    hwm: int = 64
+    """ZeroMQ High Water Mark for socket buffer queues."""
+
     def create_transport(
         self,
         *,
@@ -68,6 +71,7 @@ class ClientConfig:
             curve_secret_key=self.curve_secret_key,
             client_id=self.client_id or default_client_id,
             subscribe_streams=subscribe_streams,
+            hwm=self.hwm,
         )
 
 
@@ -91,6 +95,7 @@ def serve(
         Sequence[str] | None,
         Parameter(env_var="VSREMOTE_CURVE_ALLOWED_KEYS", consume_multiple=True),
     ] = None,
+    hwm: Annotated[int, Parameter(help="ZeroMQ High Water Mark for socket buffer queues.")] = 128,
     # Not exposed to the CLI
     ready_event: Annotated[threading.Event | None, Parameter(parse=False)] = None,
     stop_event: Annotated[threading.Event | None, Parameter(parse=False)] = None,
@@ -110,6 +115,7 @@ def serve(
         curve_secret_key: Optional CurveZMQ server secret key for end-to-end encryption.
         curve_public_key: Optional CurveZMQ server public key.
         curve_allowed_keys: Optional sequence of authorized CurveZMQ client public keys.
+        hwm: ZeroMQ High Water Mark (HWM) for socket buffer queues.
     """
     if curve and not curve_secret_key:
         pub, sec = zmq.curve_keypair()
@@ -134,6 +140,7 @@ def serve(
             curve_secret_key=curve_secret_key,
             curve_public_key=curve_public_key,
             curve_allowed_keys=curve_allowed_keys,
+            hwm=hwm,
         )
 
         async def run() -> None:

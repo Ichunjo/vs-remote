@@ -77,6 +77,11 @@ class ServerDaemon:
         curve_secret_key: str | bytes | None = None,
         curve_public_key: str | bytes | None = None,
         curve_allowed_keys: Sequence[str | bytes] | None = None,
+        hwm: int = 128,
+        tcp_keepalive: bool = True,
+        tcp_keepalive_idle: int = 10,
+        tcp_keepalive_intvl: int = 2,
+        tcp_keepalive_cnt: int = 3,
     ) -> None:
         self._ctx: zmq.asyncio.Context | None = None
         self._socket: zmq.asyncio.Socket | None = None
@@ -114,6 +119,11 @@ class ServerDaemon:
         self.curve_public_key = validate_curve_key(curve_public_key, "curve_public_key")
         self.curve_allowed_keys = validate_curve_allowed_keys(curve_allowed_keys)
         self.metrics = ServerMetricsCollector()
+        self.hwm = hwm
+        self.tcp_keepalive = tcp_keepalive
+        self.tcp_keepalive_idle = tcp_keepalive_idle
+        self.tcp_keepalive_intvl = tcp_keepalive_intvl
+        self.tcp_keepalive_cnt = tcp_keepalive_cnt
 
     async def start(self, ready_event: threading.Event | asyncio.Event | None = None) -> None:
         """Start the async server loop."""
@@ -144,8 +154,15 @@ class ServerDaemon:
 
             self._socket.setsockopt(zmq.SNDBUF, 8 * 1024 * 1024)
             self._socket.setsockopt(zmq.RCVBUF, 8 * 1024 * 1024)
-            self._socket.setsockopt(zmq.SNDHWM, 1024)
-            self._socket.setsockopt(zmq.RCVHWM, 1024)
+            self._socket.setsockopt(zmq.SNDHWM, self.hwm)
+            self._socket.setsockopt(zmq.RCVHWM, self.hwm)
+
+            if self.address.startswith("tcp://") and self.tcp_keepalive:
+                self._socket.setsockopt(zmq.TCP_KEEPALIVE, 1)
+                self._socket.setsockopt(zmq.TCP_KEEPALIVE_IDLE, self.tcp_keepalive_idle)
+                self._socket.setsockopt(zmq.TCP_KEEPALIVE_INTVL, self.tcp_keepalive_intvl)
+                self._socket.setsockopt(zmq.TCP_KEEPALIVE_CNT, self.tcp_keepalive_cnt)
+
             self._socket.bind(self.address)
             self._executor = ThreadPoolExecutor(max_workers=self.max_workers)
             self._send_lock = asyncio.Lock()

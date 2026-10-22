@@ -50,6 +50,13 @@ class RemoteClient:
         subscribe_streams: bool = True,
         replay_history: bool = True,
         startup_timeout: float = 5.0,
+        hwm: int = 64,
+        tcp_keepalive: bool = True,
+        tcp_keepalive_idle: int = 10,
+        tcp_keepalive_intvl: int = 2,
+        tcp_keepalive_cnt: int = 3,
+        heartbeat_interval: int = 5000,
+        heartbeat_timeout: int = 15000,
     ) -> None:
         ensure_vsengine_loop()
 
@@ -79,6 +86,13 @@ class RemoteClient:
             subscribe_streams=subscribe_streams,
             replay_history=replay_history,
             startup_timeout=startup_timeout,
+            hwm=hwm,
+            tcp_keepalive=tcp_keepalive,
+            tcp_keepalive_idle=tcp_keepalive_idle,
+            tcp_keepalive_intvl=tcp_keepalive_intvl,
+            tcp_keepalive_cnt=tcp_keepalive_cnt,
+            heartbeat_interval=heartbeat_interval,
+            heartbeat_timeout=heartbeat_timeout,
         )
         self._streams = {"stdout": self.stdout, "stderr": self.stderr}
 
@@ -431,6 +445,13 @@ def source(
     replay_history: bool = True,
     timeout: float = 30.0,
     startup_timeout: float = 5.0,
+    hwm: int = 64,
+    tcp_keepalive: bool = True,
+    tcp_keepalive_idle: int = 10,
+    tcp_keepalive_intvl: int = 2,
+    tcp_keepalive_cnt: int = 3,
+    heartbeat_interval: int = 5000,
+    heartbeat_timeout: int = 15000,
 ) -> vs.VideoNode:
     """
     Connect to a remote vs-remote server and mirror a video output as a local VideoNode.
@@ -460,6 +481,13 @@ def source(
         replay_history: Whether to replay historical startup logs upon subscribing.
         timeout: Maximum time in seconds to wait for initial clip info and frame fetches (default: 30.0).
         startup_timeout: Maximum time in seconds to wait for transport initialization (default: 5.0).
+        hwm: ZeroMQ High Water Mark for socket buffer queues (default: 64).
+        tcp_keepalive: Enable OS-level TCP keepalive probes (default: True).
+        tcp_keepalive_idle: Seconds of idle time before sending first TCP keepalive probe (default: 10).
+        tcp_keepalive_intvl: Seconds between subsequent TCP keepalive probes (default: 2).
+        tcp_keepalive_cnt: Number of TCP keepalive probe failures before dropping connection (default: 3).
+        heartbeat_interval: ZeroMQ native heartbeat ping interval in ms (default: 5000, 0 to disable).
+        heartbeat_timeout: ZeroMQ native heartbeat timeout in ms (default: 15000, 0 to disable).
 
     Returns:
         A vs.VideoNode that fetches frames on demand over the network.
@@ -494,6 +522,13 @@ def source(
             subscribe_streams=subscribe_streams,
             replay_history=replay_history,
             startup_timeout=startup_timeout,
+            hwm=hwm,
+            tcp_keepalive=tcp_keepalive,
+            tcp_keepalive_idle=tcp_keepalive_idle,
+            tcp_keepalive_intvl=tcp_keepalive_intvl,
+            tcp_keepalive_cnt=tcp_keepalive_cnt,
+            heartbeat_interval=heartbeat_interval,
+            heartbeat_timeout=heartbeat_timeout,
         )
         trans = client.transport
         trans.start()

@@ -71,6 +71,13 @@ class ClientTransport:
         subscribe_streams: bool = True,
         replay_history: bool = True,
         startup_timeout: float = 5.0,
+        hwm: int = 64,
+        tcp_keepalive: bool = True,
+        tcp_keepalive_idle: int = 10,
+        tcp_keepalive_intvl: int = 2,
+        tcp_keepalive_cnt: int = 3,
+        heartbeat_interval: int = 5000,
+        heartbeat_timeout: int = 15000,
     ) -> None:
         self._ctx: zmq.asyncio.Context | None = None
         self._socket: zmq.asyncio.Socket | None = None
@@ -87,7 +94,6 @@ class ClientTransport:
         self._closed = False
         self._event_queue: queue.SimpleQueue[StreamEvent | None] | None = None
         self._event_thread: threading.Thread | None = None
-        self.startup_timeout = startup_timeout
 
         if (curve_public_key is None) != (curve_secret_key is None):
             raise ValueError("curve_public_key and curve_secret_key must both be specified for client authentication")
@@ -107,6 +113,14 @@ class ClientTransport:
         self.on_event = on_event
         self.subscribe_streams = subscribe_streams
         self.replay_history = replay_history
+        self.startup_timeout = startup_timeout
+        self.hwm = hwm
+        self.tcp_keepalive = tcp_keepalive
+        self.tcp_keepalive_idle = tcp_keepalive_idle
+        self.tcp_keepalive_intvl = tcp_keepalive_intvl
+        self.tcp_keepalive_cnt = tcp_keepalive_cnt
+        self.heartbeat_interval = heartbeat_interval
+        self.heartbeat_timeout = heartbeat_timeout
 
     @property
     def is_started(self) -> bool:
@@ -588,8 +602,20 @@ class ClientTransport:
 
             socket.setsockopt(zmq.SNDBUF, 8 * 1024 * 1024)
             socket.setsockopt(zmq.RCVBUF, 8 * 1024 * 1024)
-            socket.setsockopt(zmq.SNDHWM, 1024)
-            socket.setsockopt(zmq.RCVHWM, 1024)
+            socket.setsockopt(zmq.SNDHWM, self.hwm)
+            socket.setsockopt(zmq.RCVHWM, self.hwm)
+
+            if self.address.startswith("tcp://") and self.tcp_keepalive:
+                socket.setsockopt(zmq.TCP_KEEPALIVE, 1)
+                socket.setsockopt(zmq.TCP_KEEPALIVE_IDLE, self.tcp_keepalive_idle)
+                socket.setsockopt(zmq.TCP_KEEPALIVE_INTVL, self.tcp_keepalive_intvl)
+                socket.setsockopt(zmq.TCP_KEEPALIVE_CNT, self.tcp_keepalive_cnt)
+
+            if self.heartbeat_interval > 0:
+                socket.setsockopt(zmq.HEARTBEAT_IVL, self.heartbeat_interval)
+                if self.heartbeat_timeout > 0:
+                    socket.setsockopt(zmq.HEARTBEAT_TIMEOUT, self.heartbeat_timeout)
+
             socket.connect(self.address)
             return ctx, socket
         except BaseException:
