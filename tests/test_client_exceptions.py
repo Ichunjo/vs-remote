@@ -261,6 +261,27 @@ def test_fetch_frame_timeout_raises_remote_timeout_error(server: ServerFactory) 
         assert "Timed out fetching remote frame" in str(exc_info.value)
 
 
+@pytest.mark.vpy("initial-core")
+def test_fetch_frame_with_explicit_frame_timeout(server: ServerFactory) -> None:
+    """Verify that frame_timeout overrides timeout for frame fetching."""
+    clip = vs.core.std.BlankClip(width=64, height=64, length=5)
+
+    def slow_filter(n: int, f: vs.VideoFrame) -> vs.VideoFrame:
+        time.sleep(0.3)
+        return f
+
+    slow_clip = clip.std.ModifyFrame(clip, slow_filter)
+
+    with server([slow_clip]) as (host, port), RemoteClient(f"tcp://{host}:{port}") as client:
+        # timeout is 10.0s, but frame_timeout is 50ms; frame render should time out after 50ms
+        proxy = client.get_output(0, prefetch=0, timeout=10.0, frame_timeout=0.05)
+
+        with pytest.raises(vs.Error) as exc_info:
+            proxy.get_frame(0)
+
+        assert "Timed out fetching remote frame" in str(exc_info.value)
+
+
 # Protocol & Framing Errors
 def test_transport_resolve_malformed_response_frames() -> None:
     """Verify that malformed server response frames reject the future with MalformedMessageError."""

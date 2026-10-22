@@ -839,6 +839,37 @@ def test_client_address_normalization() -> None:
     assert trans.address == "tcp://127.0.0.1:5555"
 
 
+def test_client_transport_socket_options() -> None:
+    trans = ClientTransport(
+        "tcp://127.0.0.1:5555",
+        hwm=42,
+        tcp_keepalive=True,
+        tcp_keepalive_idle=5,
+        tcp_keepalive_intvl=1,
+        tcp_keepalive_cnt=2,
+        heartbeat_interval=3000,
+        heartbeat_timeout=9000,
+    )
+    assert trans.hwm == 42
+    assert trans.tcp_keepalive is True
+    assert trans.tcp_keepalive_idle == 5
+    assert trans.tcp_keepalive_intvl == 1
+    assert trans.tcp_keepalive_cnt == 2
+    assert trans.heartbeat_interval == 3000
+    assert trans.heartbeat_timeout == 9000
+
+    ctx, sock = trans._create_socket()
+    try:
+        assert sock.getsockopt(zmq.SNDHWM) == 42
+        assert sock.getsockopt(zmq.RCVHWM) == 42
+        assert sock.getsockopt(zmq.TCP_KEEPALIVE) == 1
+        assert sock.getsockopt(zmq.HEARTBEAT_IVL) == 3000
+        assert sock.getsockopt(zmq.HEARTBEAT_TIMEOUT) == 9000
+    finally:
+        sock.close(linger=0)
+        ctx.destroy(linger=0)
+
+
 @pytest.mark.vpy("initial-core")
 def test_source_reuse_transport(running_server: tuple[str, int]) -> None:
     host, port = running_server
