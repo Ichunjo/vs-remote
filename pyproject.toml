@@ -33,7 +33,7 @@ classifiers = [
 ]
 dependencies = [
     "vapoursynth>=79",
-    "vsjetengine>=1.7.0",
+    "vsjetengine>=2.0.0rc1",
     "pyzmq>=27.1.0",
     "backports.zstd>=1.8.0 ; python_version<='3.13'",
     "msgspec>=0.21.1",
