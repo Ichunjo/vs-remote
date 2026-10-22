@@ -647,9 +647,15 @@ class ClientTransport:
                 break
 
             if parts and self._running:
-                self._dispatch_response(parts)
+                try:
+                    self._dispatch_response(parts)
+                except Exception:
+                    logger.exception("Error dispatching response in client transport")
 
     def _dispatch_response(self, parts: list[bytes]) -> None:
+        if not parts:
+            return
+
         req_id = int.from_bytes(parts[0], byteorder="big")
 
         if req_id == 0:
