@@ -17,7 +17,6 @@ from vsengine.vpy import Script, load_code, load_script
 from ..api.output import _output_metadata, clear_output_metadata
 from ..exceptions import EnvironmentNotSetError, OutputNotFoundError, ScriptNotLoadedError
 from ..protocol import ClipInfo, OutputItem, StreamEvent
-from .policy import RemotePolicy
 from .redirect import capture_streams
 
 logger = getLogger(__name__)
@@ -271,7 +270,7 @@ class ScriptRunner:
             return self._policy
 
         if not vs.has_policy():
-            self._policy = RemotePolicy(store=ContextVarStore())
+            self._policy = Policy(store=ContextVarStore(), logger=True)
             self._policy.register()
             self._registered_policy = True
             return self._policy
