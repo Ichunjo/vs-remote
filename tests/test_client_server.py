@@ -19,7 +19,7 @@ import vapoursynth as vs
 import vsengine.video
 import zmq
 import zmq.asyncio
-from vsengine.policy import ManagedEnvironment, Policy
+from vsengine import ManagedEnvironment, Policy, UnifiedFuture
 
 from vsremote.client import ClientTransport, RemoteClient, source
 from vsremote.client.transport import PendingEntry
@@ -35,9 +35,9 @@ from vsremote.exceptions import (
     TransportNotStartedError,
 )
 from vsremote.protocol import Command, RemoteLogRecord, ResponseEnvelope, StatusCode, StreamEvent, StreamOutputEvent
-from vsremote.server import LogForwarder, RemotePolicy, ScriptRunner, ServerDaemon
+from vsremote.server import LogForwarder, ScriptRunner, ServerDaemon
 from vsremote.server.daemon import _is_loopback_address
-from vsremote.utils import SafeUnifiedFuture, setup_logging
+from vsremote.utils import setup_logging
 
 if TYPE_CHECKING:
     from conftest import ServerFactory
@@ -567,25 +567,6 @@ async def test_forward_logs_disabled(server: ServerFactory, tmp_path: Path) -> N
             target_logger.removeHandler(collector)
 
 
-@pytest.mark.vpy("no-policy")
-def test_remote_policy_logger_interception(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify RemotePolicy intercepts core.log_message via api.set_logger."""
-    logs = list[tuple[int, str]]()
-
-    monkeypatch.setattr(
-        logging.getLogger("vapoursynth"),
-        "log",
-        lambda lvl, msg, *args, **kwargs: logs.append((lvl, msg)),
-    )
-
-    with RemotePolicy() as policy, policy.new_environment() as env, env.use():
-        env.core.log_message(vs.MESSAGE_TYPE_WARNING, "Direct core log from RemotePolicy")
-
-    assert len(logs) == 1
-    assert logs[0][0] == logging.WARNING
-    assert logs[0][1] == "Direct core log from RemotePolicy"
-
-
 @pytest.mark.asyncio(loop_factories=["custom"])
 @pytest.mark.vpy("no-policy")
 async def test_client_reload_script(server: ServerFactory, tmp_path: Path) -> None:
@@ -960,7 +941,7 @@ def test_transport_error_states() -> None:
 
 
 def test_pending_entry_cancelled_race(monkeypatch: pytest.MonkeyPatch) -> None:
-    fut = SafeUnifiedFuture[ResponseEnvelope[Any]]()
+    fut = UnifiedFuture[ResponseEnvelope[Any]]()
     entry = PendingEntry(fut, None)
     fut.cancel()
 

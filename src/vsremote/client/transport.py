@@ -50,7 +50,6 @@ from ..protocol import (
     unpack_payload,
     validate_curve_key,
 )
-from ..utils import SafeUnifiedFuture
 
 logger = getLogger(__name__)
 
@@ -87,7 +86,7 @@ class ClientTransport:
         self._tracker = RequestTracker()
 
         self._thread: threading.Thread | None = None
-        self._startup_future: SafeUnifiedFuture[None] | None = None
+        self._startup_future: UnifiedFuture[None] | None = None
         self._running = False
         self._start_lock = threading.RLock()
         self._started = False
@@ -509,7 +508,7 @@ class ClientTransport:
             self._event_thread = threading.Thread(None, self._event_worker, name="VSRemoteEventDispatcher", daemon=True)
             self._event_thread.start()
 
-        self._startup_future = SafeUnifiedFuture()
+        self._startup_future = UnifiedFuture()
         self._thread = threading.Thread(target=self._worker, name="VSRemoteTransport", daemon=True)
         self._thread.start()
 
@@ -709,7 +708,7 @@ class ClientTransport:
 
 
 class PendingEntry(NamedTuple):
-    future: SafeUnifiedFuture[ResponseEnvelope[Any]]
+    future: UnifiedFuture[ResponseEnvelope[Any]]
     response_type: Any | None
 
     def resolve(self, frames: list[bytes]) -> None:
@@ -738,10 +737,8 @@ class RequestTracker:
         self._next_id = 1
         self._lock = threading.Lock()
 
-    def allocate[T](
-        self, response_type: TypeForm[T] | None = None
-    ) -> tuple[int, SafeUnifiedFuture[ResponseEnvelope[T]]]:
-        fut = SafeUnifiedFuture[ResponseEnvelope[T]]()
+    def allocate[T](self, response_type: TypeForm[T] | None = None) -> tuple[int, UnifiedFuture[ResponseEnvelope[T]]]:
+        fut = UnifiedFuture[ResponseEnvelope[T]]()
 
         with self._lock:
             req_id = self._next_id
