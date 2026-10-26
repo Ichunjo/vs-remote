@@ -54,7 +54,7 @@ class ClientConfig:
     client_id: Annotated[str | None, Parameter(env_var="VSREMOTE_CLIENT_ID")] = None
     """Optional human-readable identity for this client (e.g. 'worker-1' or 'encoder')."""
 
-    hwm: int = 64
+    hwm: Annotated[int, Parameter(env_var="VSREMOTE_HWM")] = 64
     """ZeroMQ High Water Mark for socket buffer queues."""
 
     def create_transport(
